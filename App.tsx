@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
-import { CallStatus, TranscriptionEntry } from './types';
-import { decode, decodeAudioData, createBlob } from './audioUtils';
-import { SYSTEM_PROMPT, SEARCH_TOOL, WEB_SEARCH_TOOL, ICON_MIC, ICON_PHONE_OFF, ICON_HEART, ICON_MAP_PIN, ICON_GLOBE } from './constants';
+import { CallStatus, TranscriptionEntry } from './types.ts';
+import { decode, decodeAudioData, createBlob } from './audioUtils.ts';
+import { SYSTEM_PROMPT, SEARCH_TOOL, WEB_SEARCH_TOOL, ICON_MIC, ICON_PHONE_OFF, ICON_HEART, ICON_MAP_PIN, ICON_GLOBE } from './constants.tsx';
 
 interface ResourceResult {
   title: string;
