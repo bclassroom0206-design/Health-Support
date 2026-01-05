@@ -1,4 +1,5 @@
 
+import React from 'react';
 import { FunctionDeclaration, Type } from '@google/genai';
 
 export const SYSTEM_PROMPT = `
@@ -11,13 +12,18 @@ Lead Capture Protocol:
 1. যখন কোনো ব্যবহারকারী অ্যাপয়েন্টমেন্ট বুক করতে চায়, তখন অবশ্যই তার নাম (Name), মোবাইল নম্বর (Phone), এবং ইমেইল (Email) সংগ্রহ করুন।
 2. তথ্যগুলো পাওয়ার পর 'savePatientData' ফাংশনটি ব্যবহার করে সিস্টেমে জমা দিন।
 3. তথ্য জমা দেওয়ার আগে ব্যবহারকারীকে নিশ্চিত করুন যে আপনি তার তথ্য সংরক্ষণ করছেন।
-4. **গুরুত্বপূর্ণ**: 'savePatientData' সফলভাবে সম্পন্ন হওয়ার পর, ব্যবহারকারীকে স্পষ্টভাবে (explicitly) এবং সুন্দরভাবে নিশ্চিত করুন যে তাদের অ্যাপয়েন্টমেন্টের তথ্য সংরক্ষিত হয়েছে বা বুকিং সম্পন্ন হয়েছে। তাদের বলুন যে আমাদের প্রতিনিধি শীঘ্রই তাদের সাথে যোগাযোগ করবেন।
+4. **গুরুত্বপূর্ণ - কনফার্মেশন**: 'savePatientData' সফলভাবে সম্পন্ন হওয়ার পর, ব্যবহারকারীকে স্পষ্টভাবে নিশ্চিত করুন যে তাদের অ্যাপয়েন্টমেন্টের তথ্য সংরক্ষিত হয়েছে। 
+   আপনার কনফার্মেশন বার্তাটি অবশ্যই এইরকম হতে হবে: "আপনার তথ্য সফলভাবে সংরক্ষিত হয়েছে। আমাদের একজন প্রতিনিধি শীঘ্রই আপনার সাথে যোগাযোগ করবেন।"
+
+Diagnostic Test Assistance:
+- যদি ব্যবহারকারী কোনো নির্দিষ্ট ডায়াগনস্টিক টেস্টের (যেমন: Blood Test, MRI, X-Ray) দাম বা প্রস্তুতির নিয়ম (Preparation) জানতে চান, তবে 'searchWebHealthcare' টুল ব্যবহার করে সঠিক তথ্য খুঁজুন।
+- প্রাপ্ত তথ্য ব্যবহারকারীকে সংক্ষেপে বাংলায় ব্যাখ্যা করুন এবং তাকে বলুন যে বিস্তারিত তথ্য স্ক্রিনের 'ওয়েবসাইট ও বিস্তারিত' প্যানেলে দেখা যাচ্ছে।
 
 Capabilities:
 - অ্যাপয়েন্টমেন্ট বুকিং (তথ্য সংগ্রহের পর 'savePatientData' ব্যবহার করুন)।
 - ডায়াগনস্টিক টেস্টের তথ্য: টেস্টের দাম এবং প্রস্তুতির নিয়ম (যেমন: খালি পেটে থাকা) সম্পর্কে তথ্য দিন।
 - কাছাকাছি হাসপাতাল বা ডাক্তার খোঁজা (এর জন্য 'searchNearbyHealthcare' টুল ব্যবহার করুন)।
-- কোনো নির্দিষ্ট হাসপাতাল, টেস্টের দাম, বা ডাক্তারের বিস্তারিত তথ্য জানতে 'searchWebHealthcare' টুল ব্যবহার করুন।
+- কোনো নির্দিষ্ট হাসপাতাল বা টেস্টের বিস্তারিত তথ্য জানতে 'searchWebHealthcare' টুল ব্যবহার করুন।
 
 Greeting: Start with a warm greeting in Bangla: 'হেলথ সাপোর্ট সেন্টারে আপনাকে স্বাগতম, আমি নিরা। আজ আমি আপনাকে কীভাবে সাহায্য করতে পারি?'
 
@@ -54,7 +60,7 @@ export const WEB_SEARCH_TOOL: FunctionDeclaration = {
     properties: {
       query: {
         type: Type.STRING,
-        description: 'সার্চ কুয়েরি (যেমন: "Blood test price in Bangladesh")।',
+        description: 'সার্চ কুয়েরি (যেমন: "Blood test price in Bangladesh" বা "MRI preparation")।',
       },
     },
     required: ['query'],
@@ -85,22 +91,6 @@ export const ICON_PHONE_OFF = (
 
 export const ICON_HEART = (
   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-500"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
-);
-
-export const ICON_MAP_PIN = (
-  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-600"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-);
-
-export const ICON_GLOBE = (
-  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-);
-
-export const ICON_LAYOUT = (
-  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
-);
-
-export const ICON_USERS = (
-  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
 );
 
 export const ICON_SETTINGS = (
