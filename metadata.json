@@ -1,0 +1,8 @@
+{
+  "name": "Nira - Health Support AI Assistant",
+  "description": "A professional and empathetic voice AI assistant for Health Support Center, designed to handle telemedicine bookings and diagnostic inquiries.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation"
+  ]
+}
