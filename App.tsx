@@ -76,6 +76,12 @@ const App: React.FC = () => {
     setStatus(CallStatus.IDLE);
   }, []);
 
+  const handleKeySelection = async () => {
+    if ((window as any).aistudio) {
+      await (window as any).aistudio.openSelectKey();
+    }
+  };
+
   const performMapsSearch = async (category: string) => {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -114,8 +120,9 @@ const App: React.FC = () => {
       return { status: "success", found: results.length, text: response.text };
     } catch (err: any) {
       console.error("Maps search failed", err);
-      if (err?.message?.includes("Requested entity was not found") && (window as any).aistudio) {
-        await (window as any).aistudio.openSelectKey();
+      const msg = err?.message || '';
+      if ((msg.includes("Requested entity was not found") || msg.includes("API Key must be set")) && (window as any).aistudio) {
+        await handleKeySelection();
       }
       return { status: "error", message: "Failed to search Maps" };
     }
@@ -146,12 +153,25 @@ const App: React.FC = () => {
       return { status: "success", found: results.length, text: response.text };
     } catch (err: any) {
       console.error("Web search failed", err);
+      const msg = err?.message || '';
+      if ((msg.includes("Requested entity was not found") || msg.includes("API Key must be set")) && (window as any).aistudio) {
+        await handleKeySelection();
+      }
       return { status: "error", message: "Failed to search Web" };
     }
   };
 
   const handleStartCall = async () => {
     try {
+      // Proactive check for AI Studio key if missing in process.env
+      if (!process.env.API_KEY && (window as any).aistudio) {
+        const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+        if (!hasKey) {
+          await handleKeySelection();
+          // We assume success after the dialog and proceed
+        }
+      }
+
       setStatus(CallStatus.CONNECTING);
       setError(null);
 
@@ -272,10 +292,16 @@ const App: React.FC = () => {
 
       sessionRef.current = await sessionPromise;
     } catch (err: any) {
-      if (err?.message?.includes("Requested entity was not found") && (window as any).aistudio) {
-        await (window as any).aistudio.openSelectKey();
+      console.error('Connection failure:', err);
+      const msg = err?.message || '';
+      
+      if ((msg.includes("Requested entity was not found") || msg.includes("API Key must be set")) && (window as any).aistudio) {
+        await handleKeySelection();
+        setStatus(CallStatus.IDLE);
+        return;
       }
-      setError(err.message || 'ভয়েস সেশন শুরু করা যায়নি।');
+
+      setError(msg || 'ভয়েস সেশন শুরু করা যায়নি।');
       setStatus(CallStatus.ERROR);
     }
   };
@@ -348,11 +374,21 @@ const App: React.FC = () => {
               {status === CallStatus.ACTIVE && "নিরা শুনছে..."}
               {status === CallStatus.ERROR && "সংযোগ ত্রুটি"}
             </h2>
-            <p className="text-slate-500 text-sm md:text-base leading-relaxed max-w-xs mx-auto">
-              {status === CallStatus.IDLE && "নিরাপদ ভয়েস কনসালটেশন শুরু করতে নিচের বোতামটি ক্লিক করুন।"}
-              {status === CallStatus.ACTIVE && "আপনি এখন কথা বলতে পারেন। ডাক্তার বা ডায়াগনস্টিক সেন্টার খুঁজুন।"}
-              {status === CallStatus.ERROR && (error || "কিছু ভুল হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।")}
-            </p>
+            <div className="text-slate-500 text-sm md:text-base leading-relaxed max-w-xs mx-auto space-y-2">
+              <p>
+                {status === CallStatus.IDLE && "নিরাপদ ভয়েস কনসালটেশন শুরু করতে নিচের বোতামটি ক্লিক করুন।"}
+                {status === CallStatus.ACTIVE && "আপনি এখন কথা বলতে পারেন। ডাক্তার বা ডায়াগনস্টিক সেন্টার খুঁজুন।"}
+                {status === CallStatus.ERROR && (error || "কিছু ভুল হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।")}
+              </p>
+              {status === CallStatus.ERROR && error?.includes("API Key") && (window as any).aistudio && (
+                <button 
+                  onClick={handleKeySelection}
+                  className="text-emerald-600 font-bold underline hover:text-emerald-700"
+                >
+                  API Key সিলেক্ট করুন
+                </button>
+              )}
+            </div>
           </div>
 
           <button
