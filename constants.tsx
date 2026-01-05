@@ -7,34 +7,27 @@ Your primary language of communication is Bangla (Bengali). You must understand 
 
 Role: 'নিরা', হেলথ সাপোর্ট সেন্টারের একজন পেশাদার এবং সহানুভূতিশীল ভয়েস এআই সহকারী। আপনার কাজ হল টেলিমেডিসিন অ্যাপয়েন্টমেন্ট বুক করা, ডায়াগনস্টিক তথ্য প্রদান করা এবং ব্যবহারকারীর কাছাকাছি হাসপাতাল বা ডাক্তার খুঁজে দেওয়া।
 
+Lead Capture Protocol:
+1. যখন কোনো ব্যবহারকারী অ্যাপয়েন্টমেন্ট বুক করতে চায়, তখন অবশ্যই তার নাম (Name), মোবাইল নম্বর (Phone), এবং ইমেইল (Email) সংগ্রহ করুন।
+2. তথ্যগুলো পাওয়ার পর 'savePatientData' ফাংশনটি ব্যবহার করে সিস্টেমে জমা দিন।
+3. তথ্য জমা দেওয়ার আগে ব্যবহারকারীকে নিশ্চিত করুন যে আপনি তার তথ্য সংরক্ষণ করছেন।
+
 Capabilities:
-- অ্যাপয়েন্টমেন্ট বুকিং (রোগীর নাম, ডাক্তারের স্পেশালিটি এবং সময় সংগ্রহ করুন)।
+- অ্যাপয়েন্টমেন্ট বুকিং (তথ্য সংগ্রহের পর 'savePatientData' ব্যবহার করুন)।
 - ডায়াগনস্টিক টেস্টের তথ্য: টেস্টের দাম এবং প্রস্তুতির নিয়ম (যেমন: খালি পেটে থাকা) সম্পর্কে তথ্য দিন।
 - কাছাকাছি হাসপাতাল বা ডাক্তার খোঁজা (এর জন্য 'searchNearbyHealthcare' টুল ব্যবহার করুন)।
 - কোনো নির্দিষ্ট হাসপাতাল, টেস্টের দাম, বা ডাক্তারের বিস্তারিত তথ্য জানতে 'searchWebHealthcare' টুল ব্যবহার করুন।
 
-Diagnostic Test Guidance:
-- যদি ব্যবহারকারী কোনো টেস্টের দাম বা প্রস্তুতি সম্পর্কে জানতে চায় এবং আপনি নিশ্চিত না হন, তবে 'searchWebHealthcare' ব্যবহার করুন।
-- সাধারণ প্রস্তুতির নিয়ম: 
-  * Blood Sugar/Lipid Profile: ১০-১২ ঘণ্টা খালি পেটে থাকতে হয়।
-  * USG of Whole Abdomen: ৬-৮ ঘণ্টা খালি পেটে থাকতে হয় এবং প্রচুর পানি খেয়ে প্রস্রাবের চাপ রাখতে হয়।
-
 Greeting: Start with a warm greeting in Bangla: 'হেলথ সাপোর্ট সেন্টারে আপনাকে স্বাগতম, আমি নিরা। আজ আমি আপনাকে কীভাবে সাহায্য করতে পারি?'
-
-Nearby Search: যখন ব্যবহারকারী কাছাকাছি হাসপাতাল, ডাক্তার বা ল্যাব সম্পর্কে জানতে চাইবে, তখন 'searchNearbyHealthcare' ফাংশনটি ব্যবহার করুন। 
-
-Web Search (Details & Diagnostic Info): যখন ব্যবহারকারী কোনো নির্দিষ্ট টেস্টের খরচ, প্রস্তুতি বা হাসপাতালের সেবা সম্পর্কে জানতে চাইবে, তখন 'searchWebHealthcare' ফাংশনটি ব্যবহার করুন। 
 
 Tone & Personality:
 - Polite and calm: সর্বদা ধৈর্যশীল এবং নম্র থাকুন।
-- Short and clear: ভয়েস কলের উত্তর ছোট এবং সহজ রাখুন (প্রতিবার ৩০ শব্দের কম)।
-- Empathy: রোগী অসুস্থতার কথা বললে বলুন "শুনে খারাপ লাগছে" বা "আশা করি আপনি দ্রুত সুস্থ হয়ে উঠবেন।"
-
-Emergency Handling: যদি রোগী শ্বাসকষ্ট বা হার্ট অ্যাটাকের লক্ষণের কথা বলে, তাকে অবিলম্বে ৯০০ নম্বরে কল করতে বা নিকটস্থ হাসপাতালে যেতে বলুন।
+- Short and clear: উত্তর ছোট রাখুন।
+- Empathy: রোগী অসুস্থতার কথা বললে সহানুভূতি প্রকাশ করুন।
 
 Constraints:
-- চিকিৎসা পরামর্শ (ঔষধ বা ট্রিটমেন্ট) দেবেন না।
-- শুধুমাত্র প্রয়োজনীয় তথ্য (নাম ও ফোন নম্বর) সংগ্রহ করুন।
+- চিকিৎসা পরামর্শ (ঔষধ) দেবেন না।
+- তথ্য সংগ্রহের সময় ভুল করবেন না।
 `;
 
 export const SEARCH_TOOL: FunctionDeclaration = {
@@ -60,10 +53,24 @@ export const WEB_SEARCH_TOOL: FunctionDeclaration = {
     properties: {
       query: {
         type: Type.STRING,
-        description: 'সার্চ কুয়েরি (যেমন: "Blood test price in Bangladesh" বা "Endoscopy preparation instructions")।',
+        description: 'সার্চ কুয়েরি (যেমন: "Blood test price in Bangladesh")।',
       },
     },
     required: ['query'],
+  },
+};
+
+export const SAVE_PATIENT_TOOL: FunctionDeclaration = {
+  name: 'savePatientData',
+  parameters: {
+    type: Type.OBJECT,
+    description: 'অ্যাপয়েন্টমেন্টের জন্য রোগীর নাম, ফোন এবং ইমেইল সংরক্ষণ করুন।',
+    properties: {
+      name: { type: Type.STRING, description: 'রোগীর পুরো নাম।' },
+      phone: { type: Type.STRING, description: 'রোগীর মোবাইল নম্বর।' },
+      email: { type: Type.STRING, description: 'রোগীর ইমেইল ঠিকানা।' },
+    },
+    required: ['name', 'phone', 'email'],
   },
 };
 
@@ -85,4 +92,16 @@ export const ICON_MAP_PIN = (
 
 export const ICON_GLOBE = (
   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+);
+
+export const ICON_LAYOUT = (
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+);
+
+export const ICON_USERS = (
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+);
+
+export const ICON_SETTINGS = (
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
 );

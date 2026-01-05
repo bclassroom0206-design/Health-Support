@@ -11,3 +11,14 @@ export interface TranscriptionEntry {
   text: string;
   timestamp: number;
 }
+
+export interface PatientRecord {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  timestamp: number;
+  status: 'new' | 'contacted' | 'booked';
+}
+
+export type AppView = 'assistant' | 'admin';
