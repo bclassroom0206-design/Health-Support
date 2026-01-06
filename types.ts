@@ -21,4 +21,4 @@ export interface PatientRecord {
   status: 'new' | 'contacted' | 'booked';
 }
 
-export type AppView = 'assistant' | 'admin';
+export type AppView = 'assistant' | 'admin' | 'guide';
