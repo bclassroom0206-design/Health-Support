@@ -21,6 +21,19 @@ const LoadingSpinner = ({ size = "w-6 h-6", color = "text-emerald-500" }) => (
   </div>
 );
 
+const TypingIndicator = () => (
+  <div className="flex justify-start animate-in fade-in duration-300">
+    <div className="bg-white border border-slate-100 p-5 rounded-[1.8rem] rounded-tl-none shadow-sm flex items-center gap-3">
+      <span className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-500">নিরা চিন্তা করছে</span>
+      <div className="flex gap-1.5">
+        <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce [animation-duration:0.8s] [animation-delay:-0.3s]"></div>
+        <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce [animation-duration:0.8s] [animation-delay:-0.15s]"></div>
+        <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce [animation-duration:0.8s]"></div>
+      </div>
+    </div>
+  </div>
+);
+
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('assistant');
   const [status, setStatus] = useState<CallStatus>(CallStatus.IDLE);
@@ -119,7 +132,7 @@ const App: React.FC = () => {
     if (view === 'assistant') {
       lastTranscriptionRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [transcriptions, activeUserText, activeNiraText, view]);
+  }, [transcriptions, activeUserText, activeNiraText, view, isSearchingInternal, isSearchingWeb]);
 
   const generateSummary = async (transcript: TranscriptionEntry[]): Promise<string> => {
     if (transcript.length < 2) return "সংক্ষিপ্ত কথা হয়েছে।";
@@ -410,6 +423,7 @@ const App: React.FC = () => {
           onclose: () => handleStopCall(),
         },
         config: {
+          // Correct typo responseModalalities to responseModalities
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
           systemInstruction: SYSTEM_PROMPT,
@@ -423,6 +437,60 @@ const App: React.FC = () => {
       console.error("Connection error:", err);
       setError(err.message || 'Error connecting to Nira');
       setStatus(CallStatus.ERROR);
+    }
+  };
+
+  const [chatInput, setChatInput] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim() || isTyping || status === CallStatus.CONNECTING) return;
+    const userMsg = chatInput.trim();
+    setChatInput('');
+    setTranscriptions(prev => [...prev, { role: 'user', text: userMsg, timestamp: Date.now() }]);
+    setIsTyping(true);
+    
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const history = transcriptions.slice(-10).map(t => ({ 
+        role: t.role === 'user' ? 'user' : 'model', 
+        parts: [{ text: t.text }] 
+      }));
+      
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: [...history, { role: 'user', parts: [{ text: userMsg }] }],
+        config: {
+          systemInstruction: SYSTEM_PROMPT,
+          tools: [{ functionDeclarations: [SAVE_PATIENT_TOOL, WEB_SEARCH_TOOL, SEARCH_INTERNAL_TOOL] }],
+        }
+      });
+      
+      let niraReply = response.text || '';
+      if (response.candidates?.[0]?.content?.parts) {
+        for (const part of response.candidates[0].content.parts) {
+          if (part.functionCall) {
+            const fc = part.functionCall;
+            if (fc.name === 'savePatientData') {
+              setPendingLead(fc.args as any);
+              niraReply = "তথ্য সংগ্রহের জন্য ধন্যবাদ। অনুগ্রহ করে স্ক্রিনে কনফার্মেশন বাটনটি চাপুন।";
+            } else if (fc.name === 'searchInternalDatabase') {
+              setIsSearchingInternal(true);
+              const args = fc.args as any;
+              const res = db[args.category as keyof HealthDatabase].filter((i: any) => Object.values(i).some(v => String(v).toLowerCase().includes(args.query.toLowerCase())));
+              setInternalResults(res);
+              setIsSearchingInternal(false);
+              niraReply = res.length > 0 ? "আমি আমাদের ডাটাবেসে কিছু তথ্য খুঁজে পেয়েছি। আপনি ডান প্যানেলে বিস্তারিত দেখতে পারেন।" : "দুঃখিত, আমাদের ডাটাবেসে এই মুহূর্তে এই তথ্যটি নেই।";
+            }
+          }
+        }
+      }
+      setTranscriptions(prev => [...prev, { role: 'nira', text: niraReply, timestamp: Date.now() }]);
+    } catch (err) { 
+      setTranscriptions(prev => [...prev, { role: 'nira', text: "দুঃখিত, একটি ত্রুটি হয়েছে।", timestamp: Date.now() }]); 
+    } finally { 
+      setIsTyping(false); 
     }
   };
 
@@ -1006,9 +1074,29 @@ const App: React.FC = () => {
               ))}
               {activeUserText && <div className="flex flex-col items-end opacity-60"><div className="max-w-[85%] rounded-[1.5rem] p-5 text-sm font-bold bg-emerald-50 text-emerald-800 border border-emerald-100 rounded-tr-none italic animate-pulse">{activeUserText}</div></div>}
               {activeNiraText && <div className="flex flex-col items-start animate-in fade-in"><span className="text-[9px] font-black uppercase tracking-widest text-emerald-600 mb-2 px-3">নিরা বলছে...</span><div className="max-w-[85%] rounded-[1.5rem] p-5 text-sm font-bold bg-white text-slate-500 border border-slate-100 rounded-tl-none shadow-sm flex items-center gap-3">{activeNiraText}<div className="w-1.5 h-5 bg-emerald-400 animate-pulse rounded-full"></div></div></div>}
+              {(isTyping || isSearchingInternal || isSearchingWeb) && <TypingIndicator />}
             </>
           )}
           <div ref={lastTranscriptionRef} />
+        </div>
+        <div className="p-6 border-t border-slate-50">
+          <form onSubmit={handleSendMessage} className="flex gap-4">
+            <input 
+              type="text" 
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="বার্তা লিখুন..."
+              disabled={isTyping}
+              className="flex-1 px-6 py-4 bg-slate-50 border border-slate-100 rounded-[1.5rem] text-sm font-bold focus:ring-4 focus:ring-emerald-500/10 transition-all outline-none"
+            />
+            <button 
+              type="submit" 
+              disabled={!chatInput.trim() || isTyping}
+              className="w-14 h-14 bg-emerald-600 text-white rounded-[1.5rem] flex items-center justify-center shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition-all disabled:opacity-50"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+          </form>
         </div>
       </section>
 
