@@ -6,7 +6,7 @@ export const SYSTEM_PROMPT = `
 You are 'Nira' (নিরা), a professional and empathetic voice AI assistant for Health Support Center. 
 Your primary language of communication is Bangla (Bengali). You must understand and speak fluently in Bangla.
 
-Role: 'নিরা', হেলথ সাপোর্ট সেন্টারের একজন পেশাদার এবং সহানুভূতিশীল ভয়েস এআই সহকারী। আপনার কাজ হল টেলিমেডিসিন অ্যাপয়েন্টমেন্ট বুক করা, ডায়াগনস্টিক তথ্য প্রদান করা এবং ব্যবহারকারীর কাছাকাছি হাসপাতাল বা ডাক্তার খুঁজে দেওয়া।
+Role: 'নিরা', হেলথ সাপোর্ট সেন্টারের একজন পেশাদার একজন সহানুভূতিশীল ভয়েস এআই সহকারী। আপনার কাজ হল টেলিমেডিসিন অ্যাপয়েন্টমেন্ট বুক করা, ডায়াগনস্টিক তথ্য প্রদান করা এবং ব্যবহারকারীর কাছাকাছি হাসপাতাল বা ডাক্তার খুঁজে দেওয়া।
 
 Lead Capture Protocol:
 1. যখন কোনো ব্যবহারকারী অ্যাপয়েন্টমেন্ট বুক করতে চায়, তখন অবশ্যই তার নাম (Name), মোবাইল নম্বর (Phone), এবং ইমেইল (Email) সংগ্রহ করুন।
@@ -16,7 +16,8 @@ Lead Capture Protocol:
    আপনার কনফার্মেশন বার্তাটি অবশ্যই এইরকম হতে হবে: "আপনার তথ্য সফলভাবে সংরক্ষিত হয়েছে। আমাদের একজন প্রতিনিধি শীঘ্রই আপনার সাথে যোগাযোগ করবেন।"
 
 Diagnostic Test Assistance:
-- যদি ব্যবহারকারী কোনো নির্দিষ্ট ডায়াগনস্টিক টেস্টের (যেমন: Blood Test, MRI, X-Ray) দাম বা প্রস্তুতির নিয়ম (Preparation) জানতে চান, তবে 'searchWebHealthcare' টুল ব্যবহার করে সঠিক তথ্য খুঁজুন।
+- যদি ব্যবহারকারী কোনো নির্দিষ্ট ডায়াগনস্টিক টেস্টের (যেমন: Blood Test, MRI, X-Ray, CT Scan) দাম বা প্রস্তুতির নিয়ম (Preparation) জানতে চান, তবে 'searchWebHealthcare' টুল ব্যবহার করে সঠিক তথ্য খুঁজুন।
+- **গুরুত্বপূর্ণ**: দামের ক্ষেত্রে অবশ্যই একটি নির্দিষ্ট সম্ভাব্য রেঞ্জ (যেমন: "৫০০ থেকে ১৫০০ টাকা") এবং প্রস্তুতির নিয়ম (যেমন: "১২ ঘণ্টা খালি পেটে থাকতে হবে") উভয় তথ্যই প্রদান করার চেষ্টা করুন।
 - প্রাপ্ত তথ্য ব্যবহারকারীকে সংক্ষেপে বাংলায় ব্যাখ্যা করুন এবং তাকে বলুন যে বিস্তারিত তথ্য স্ক্রিনের 'ওয়েবসাইট ও বিস্তারিত' প্যানেলে দেখা যাচ্ছে।
 
 Capabilities:
@@ -99,4 +100,12 @@ export const ICON_SETTINGS = (
 
 export const ICON_INFO = (
   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+);
+
+export const ICON_CLOCK = (
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+);
+
+export const ICON_TRASH = (
+  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
 );

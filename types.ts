@@ -21,4 +21,11 @@ export interface PatientRecord {
   status: 'new' | 'contacted' | 'booked';
 }
 
-export type AppView = 'assistant' | 'admin' | 'guide';
+export interface CallHistoryEntry {
+  id: string;
+  timestamp: number;
+  summary: string;
+  transcript: TranscriptionEntry[];
+}
+
+export type AppView = 'assistant' | 'admin' | 'guide' | 'history';
