@@ -1,12 +1,24 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
-import { CallStatus, TranscriptionEntry, PatientRecord, AppView, CallHistoryEntry } from './types.ts';
+import { 
+  CallStatus, TranscriptionEntry, PatientRecord, AppView, CallHistoryEntry,
+  HealthDatabase, DoctorEntry, DiagnosticEntry, HospitalEntry, MedicineEntry, FirstAidEntry
+} from './types.ts';
 import { decode, decodeAudioData, createBlob } from './audioUtils.ts';
 import { 
-  SYSTEM_PROMPT, SAVE_PATIENT_TOOL, WEB_SEARCH_TOOL,
-  ICON_MIC, ICON_PHONE_OFF, ICON_HEART, ICON_SETTINGS, ICON_INFO, ICON_CLOCK, ICON_TRASH 
+  SYSTEM_PROMPT, SAVE_PATIENT_TOOL, WEB_SEARCH_TOOL, SEARCH_INTERNAL_TOOL,
+  ICON_MIC, ICON_PHONE_OFF, ICON_HEART, ICON_SETTINGS, ICON_INFO, ICON_CLOCK, ICON_TRASH, ICON_DATABASE, ICON_PLUS 
 } from './constants.tsx';
+
+const LoadingSpinner = ({ size = "w-6 h-6", color = "text-emerald-500" }) => (
+  <div className={`${size} animate-spin`}>
+    <svg className={color} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
+  </div>
+);
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('assistant');
@@ -17,13 +29,33 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [lastSavedPatient, setLastSavedPatient] = useState<string | null>(null);
   const [webResults, setWebResults] = useState<{title: string, snippet: string}[]>([]);
+  const [internalResults, setInternalResults] = useState<any[]>([]);
   const [callHistory, setCallHistory] = useState<CallHistoryEntry[]>([]);
+  const [isSearchingWeb, setIsSearchingWeb] = useState(false);
+  const [isSearchingInternal, setIsSearchingInternal] = useState(false);
   
+  // History Detail State
+  const [selectedHistory, setSelectedHistory] = useState<CallHistoryEntry | null>(null);
+
+  // Pending Booking Confirmation
+  const [pendingLead, setPendingLead] = useState<{name: string, phone: string, email: string} | null>(null);
+
   // Admin state
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
   const [adminPassword, setAdminPassword] = useState<string>('');
   const [loginError, setLoginError] = useState<string>('');
   const [patients, setPatients] = useState<PatientRecord[]>([]);
+
+  // Health Database state
+  const [db, setDb] = useState<HealthDatabase>({
+    doctors: [],
+    diagnostics: [],
+    hospitals: [],
+    medicines: [],
+    firstAid: []
+  });
+  const [activeDbTab, setActiveDbTab] = useState<keyof HealthDatabase>('doctors');
+  const [isEditing, setIsEditing] = useState<string | null>(null);
 
   const isKeyAvailable = !!process.env.API_KEY;
 
@@ -35,6 +67,10 @@ const App: React.FC = () => {
     const savedHistory = localStorage.getItem('nira_call_history');
     if (savedHistory) {
       try { setCallHistory(JSON.parse(savedHistory)); } catch (e) { console.error("History load failed", e); }
+    }
+    const savedDb = localStorage.getItem('nira_health_db');
+    if (savedDb) {
+      try { setDb(JSON.parse(savedDb)); } catch (e) { console.error("Database load failed", e); }
     }
     const auth = localStorage.getItem('nira_admin_auth');
     if (auth === 'true') setIsAdminAuthenticated(true);
@@ -48,6 +84,10 @@ const App: React.FC = () => {
     localStorage.setItem('nira_call_history', JSON.stringify(callHistory));
   }, [callHistory]);
 
+  useEffect(() => {
+    localStorage.setItem('nira_health_db', JSON.stringify(db));
+  }, [db]);
+
   const inputAudioContextRef = useRef<AudioContext | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
   const nextStartTimeRef = useRef<number>(0);
@@ -57,7 +97,6 @@ const App: React.FC = () => {
   const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const lastTranscriptionRef = useRef<HTMLDivElement | null>(null);
 
-  // Accumulators for transcription
   const currentInputAcc = useRef('');
   const currentOutputAcc = useRef('');
 
@@ -119,11 +158,37 @@ const App: React.FC = () => {
     setPatients(prev => [newRecord, ...prev]);
     setLastSavedPatient(name);
     setTimeout(() => setLastSavedPatient(null), 10000); 
-    return "সফলভাবে সংরক্ষিত। রোগীকে বলুন: 'আপনার তথ্য সফলভাবে সংরক্ষিত হয়েছে। আমাদের একজন প্রতিনিধি শীঘ্রই আপনার সাথে যোগাযোগ করবেন।'";
+    return "সফলভাবে সংরক্ষিত।";
+  };
+
+  const updateLeadStatus = (id: string, newStatus: PatientRecord['status']) => {
+    setPatients(prev => prev.map(p => p.id === id ? { ...p, status: newStatus } : p));
   };
 
   const deleteLead = (id: string) => setPatients(prev => prev.filter(p => p.id !== id));
-  const deleteHistory = (id: string) => setCallHistory(prev => prev.filter(h => h.id !== id));
+  const deleteHistory = (id: string) => {
+    setCallHistory(prev => prev.filter(h => h.id !== id));
+    if (selectedHistory?.id === id) setSelectedHistory(null);
+  };
+
+  // Healthcare DB CRUD
+  const upsertDbEntry = (category: keyof HealthDatabase, data: any) => {
+    setDb(prev => {
+      const list = [...prev[category]];
+      if (isEditing) {
+        const index = list.findIndex((item: any) => item.id === isEditing);
+        if (index !== -1) list[index] = { ...data, id: isEditing };
+      } else {
+        list.unshift({ ...data, id: Math.random().toString(36).substr(2, 9) });
+      }
+      return { ...prev, [category]: list };
+    });
+    setIsEditing(null);
+  };
+
+  const deleteDbEntry = (category: keyof HealthDatabase, id: string) => {
+    setDb(prev => ({ ...prev, [category]: prev[category].filter((item: any) => item.id !== id) }));
+  };
 
   const handleStopCall = useCallback(async () => {
     if (transcriptions.length > 0) {
@@ -155,6 +220,10 @@ const App: React.FC = () => {
     setActiveNiraText('');
     currentInputAcc.current = '';
     currentOutputAcc.current = '';
+    setPendingLead(null);
+    setInternalResults([]);
+    setIsSearchingInternal(false);
+    setIsSearchingWeb(false);
   }, [transcriptions]);
 
   const handleStartCall = async () => {
@@ -211,34 +280,36 @@ const App: React.FC = () => {
                 let toolResponse: any = "ok";
                 if (fc.name === 'savePatientData') {
                   const args = fc.args as any;
-                  toolResponse = saveLead(args.name, args.phone, args.email);
-                } else if (fc.name === 'searchWebHealthcare') {
+                  setPendingLead({ name: args.name, phone: args.phone, email: args.email });
+                  toolResponse = "Pending user confirmation on screen. The user is currently viewing the confirmation modal.";
+                } else if (fc.name === 'searchInternalDatabase') {
+                  setIsSearchingInternal(true);
                   const args = fc.args as any;
+                  const category = args.category as keyof HealthDatabase;
                   const query = args.query.toLowerCase();
                   
-                  let costRange = "৫০০ - ২০০০ টাকা";
-                  let preparation = "তেমন কোনো বিশেষ প্রস্তুতির প্রয়োজন নেই।";
+                  // Simulate brief async delay for visual feedback
+                  await new Promise(r => setTimeout(r, 800));
                   
-                  if (query.includes("mri")) {
-                    costRange = "৪০০০ - ১৫০০০ টাকা (অঙ্গভেদে পরিবর্তিত হতে পারে)";
-                    preparation = "শরীরে কোনো ধাতব বস্তু রাখা যাবে না। টেস্টের ৪-৬ ঘণ্টা আগে খাবার না খাওয়াই ভালো।";
-                  } else if (query.includes("blood") || query.includes("রক্ত")) {
-                    costRange = "৩০০ - ১০০০ টাকা";
-                    preparation = "বেশিরভাগ ক্ষেত্রে ৮-১২ ঘণ্টা খালি পেটে থাকতে হয়। সকালে পানি পান করা যাবে।";
-                  } else if (query.includes("x-ray") || query.includes("এক্স-রে")) {
-                    costRange = "৪০০ - ৮০০ টাকা";
-                    preparation = "গর্ভবতী মহিলাদের ক্ষেত্রে ডাক্তারকে আগে জানাতে হবে। অলংকার বা মেটাল সরিয়ে রাখতে হবে।";
-                  } else if (query.includes("ct scan") || query.includes("সিটি স্ক্যান")) {
-                    costRange = "৩৫০০ - ৮০০০ টাকা";
-                    preparation = "ডাই (Contrast) ব্যবহার করলে ৪ ঘণ্টা খালি পেটে থাকতে হবে। কিডনির সমস্যার ইতিহাস থাকলে জানাতে হবে।";
-                  }
-
+                  const results = (db[category] || []).filter((item: any) => 
+                    Object.values(item).some(val => String(val).toLowerCase().includes(query))
+                  );
+                  setInternalResults(results);
+                  setIsSearchingInternal(false);
+                  toolResponse = results.length > 0 ? results : "No matches found in our internal database.";
+                } else if (fc.name === 'searchWebHealthcare') {
+                  setIsSearchingWeb(true);
+                  const args = fc.args as any;
+                  
+                  // Simulate async web search delay
+                  await new Promise(r => setTimeout(r, 1500));
+                  
                   const mockResults = [
-                    {title: `Information for: ${args.query}`, snippet: `সম্ভাব্য খরচ: ${costRange}। প্রস্তুতির নিয়ম: ${preparation}`},
-                    {title: `Healthcare Tips for ${args.query}`, snippet: "সঠিক ফলাফলের জন্য অনুমোদিত ল্যাবরেটরি থেকে টেস্ট করানো উচিত। আপনার ডাক্তারের পরামর্শ মেনে চলুন।"}
+                    {title: `Web Insight for ${args.query}`, snippet: "Extracted information regarding health services, prices and preparations from public web sources."}
                   ];
                   setWebResults(mockResults);
-                  toolResponse = { results: mockResults, status: "Success", details: { cost: costRange, prep: preparation } };
+                  setIsSearchingWeb(false);
+                  toolResponse = mockResults;
                 }
                 sessionPromise.then(session => {
                   session.sendToolResponse({
@@ -266,12 +337,8 @@ const App: React.FC = () => {
             if (message.serverContent?.turnComplete) {
               setTranscriptions(prev => {
                 const next = [...prev];
-                if (currentInputAcc.current.trim()) {
-                  next.push({ role: 'user', text: currentInputAcc.current, timestamp: Date.now() });
-                }
-                if (currentOutputAcc.current.trim()) {
-                  next.push({ role: 'nira', text: currentOutputAcc.current, timestamp: Date.now() });
-                }
+                if (currentInputAcc.current.trim()) next.push({ role: 'user', text: currentInputAcc.current, timestamp: Date.now() });
+                if (currentOutputAcc.current.trim()) next.push({ role: 'nira', text: currentOutputAcc.current, timestamp: Date.now() });
                 return next;
               });
               currentInputAcc.current = '';
@@ -298,10 +365,7 @@ const App: React.FC = () => {
           },
           onerror: (e: any) => {
             console.error("Live Error:", e);
-            if (e?.message?.includes("Requested entity was not found")) {
-                handleKeySelection();
-            }
-            setError(e.message || "Connection error. Please check your key.");
+            setError(e.message || "Connection error.");
             handleStopCall();
           },
           onclose: () => handleStopCall(),
@@ -310,7 +374,7 @@ const App: React.FC = () => {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
           systemInstruction: SYSTEM_PROMPT,
-          tools: [{ functionDeclarations: [SAVE_PATIENT_TOOL, WEB_SEARCH_TOOL] }],
+          tools: [{ functionDeclarations: [SAVE_PATIENT_TOOL, WEB_SEARCH_TOOL, SEARCH_INTERNAL_TOOL] }],
           outputAudioTranscription: {},
           inputAudioTranscription: {},
         },
@@ -318,150 +382,202 @@ const App: React.FC = () => {
       sessionRef.current = await sessionPromise;
     } catch (err: any) {
       console.error("Connection error:", err);
-      if (err.message?.includes("Requested entity was not found")) {
-        handleKeySelection();
-      }
       setError(err.message || 'Error connecting to Nira');
       setStatus(CallStatus.ERROR);
     }
   };
 
-  const renderAssistant = () => (
-    <main className="flex-1 max-w-[1600px] mx-auto w-full p-4 md:p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-in fade-in duration-500">
-      <section className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 p-8 flex flex-col items-center justify-center text-center transition-all hover:shadow-xl hover:shadow-emerald-500/5 group relative min-h-[400px]">
-        {lastSavedPatient && (
-          <div className="absolute top-6 left-1/2 -translate-x-1/2 w-[85%] bg-emerald-600 text-white py-3 px-4 rounded-2xl text-[10px] font-black uppercase tracking-wider animate-in slide-in-from-top-4 shadow-xl z-20 flex items-center gap-2">
-            <div className="w-2 h-2 bg-white rounded-full animate-ping"></div>
-            বুকিং সম্পন্ন: {lastSavedPatient}
+  const renderConfirmationModal = () => {
+    if (!pendingLead) return null;
+    return (
+      <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-300">
+        <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl p-8 border border-slate-100 animate-in zoom-in-95">
+          <div className="flex items-center gap-4 mb-8">
+            <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center shadow-inner">
+              {ICON_HEART}
+            </div>
+            <div>
+              <h3 className="text-xl font-black text-slate-800 tracking-tight">বুকিং নিশ্চিত করুন</h3>
+              <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Confirm Appointment</p>
+            </div>
           </div>
-        )}
-        
-        <div className={`w-40 h-40 md:w-56 md:h-56 rounded-full flex items-center justify-center mb-10 transition-all duration-700 ${status === CallStatus.ACTIVE ? 'bg-emerald-50 scale-110 shadow-inner' : 'bg-slate-50'}`}>
-          <div className={`scale-[2] md:scale-[3] transition-all duration-500 ${status === CallStatus.ACTIVE ? 'text-emerald-600' : 'text-slate-300 group-hover:scale-[3.2]'}`}>
-            {status === CallStatus.ACTIVE ? (
-              <div className="flex gap-1 items-end">
-                <div className="w-2 h-8 bg-emerald-500 rounded-full animate-bounce [animation-duration:1s]"></div>
-                <div className="w-2 h-16 bg-emerald-500 rounded-full animate-bounce [animation-duration:0.8s]"></div>
-                <div className="w-2 h-10 bg-emerald-500 rounded-full animate-bounce [animation-duration:1.2s]"></div>
+          
+          <div className="space-y-4 mb-8">
+            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+              <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">নাম (Name)</span>
+              <p className="text-sm font-black text-slate-700 mt-1">{pendingLead.name}</p>
+            </div>
+            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+              <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">ফোন (Phone)</span>
+              <p className="text-sm font-black text-slate-700 mt-1">{pendingLead.phone}</p>
+            </div>
+            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+              <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">ইমেইল (Email)</span>
+              <p className="text-sm font-black text-slate-700 mt-1">{pendingLead.email}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <button 
+              onClick={() => setPendingLead(null)}
+              className="py-5 rounded-2xl border border-slate-200 text-xs font-black uppercase tracking-widest text-slate-500 hover:bg-slate-50 transition-all active:scale-95"
+            >
+              বাতিল
+            </button>
+            <button 
+              onClick={() => {
+                saveLead(pendingLead.name, pendingLead.phone, pendingLead.email);
+                setPendingLead(null);
+              }}
+              className="py-5 rounded-2xl bg-emerald-600 text-white text-xs font-black uppercase tracking-widest shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95"
+            >
+              নিশ্চিত করুন
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDbTabContent = () => {
+    const categories: {key: keyof HealthDatabase, label: string}[] = [
+      {key: 'doctors', label: 'ডাক্তার'},
+      {key: 'diagnostics', label: 'ডায়াগনস্টিক'},
+      {key: 'hospitals', label: 'হাসপাতাল'},
+      {key: 'medicines', label: 'ঔষধ'},
+      {key: 'firstAid', label: 'ফার্স্ট এইড'}
+    ];
+
+    const currentItem = isEditing ? (db[activeDbTab] as any[]).find(i => i.id === isEditing) : null;
+
+    const handleSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      const formData = new FormData(e.currentTarget as HTMLFormElement);
+      const data = Object.fromEntries(formData.entries());
+      upsertDbEntry(activeDbTab, data);
+      (e.currentTarget as HTMLFormElement).reset();
+    };
+
+    return (
+      <div className="bg-white p-8 md:p-10 rounded-[2.5rem] border border-slate-100 shadow-sm col-span-1 lg:col-span-3">
+        <div className="flex items-center justify-between mb-10 overflow-x-auto pb-4 gap-3 no-scrollbar">
+          {categories.map(cat => (
+            <button 
+              key={cat.key}
+              onClick={() => { setActiveDbTab(cat.key); setIsEditing(null); }}
+              className={`px-8 py-3 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all whitespace-nowrap shadow-sm border ${activeDbTab === cat.key ? 'bg-blue-600 text-white border-blue-600 shadow-blue-100' : 'bg-white text-slate-400 border-slate-100 hover:bg-slate-50'}`}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-12">
+          {/* Editor Form */}
+          <div className="space-y-8">
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+                {ICON_PLUS}
               </div>
-            ) : ICON_MIC}
-          </div>
-        </div>
-        
-        <h2 className="text-xl md:text-2xl font-black mb-3 text-slate-800">
-          {status === CallStatus.IDLE && "নিরার সাথে কথা বলুন"}
-          {status === CallStatus.CONNECTING && "সংযোগ হচ্ছে..."}
-          {status === CallStatus.ACTIVE && "নিরা শুনছে..."}
-          {status === CallStatus.ERROR && "সংযোগ ত্রুটি"}
-        </h2>
-        
-        <p className="text-slate-500 text-xs md:text-sm font-medium mb-10 px-4 leading-relaxed opacity-70">
-          {status === CallStatus.ERROR ? error : "নিরাপদ ভয়েস কনসালটেশন বা অ্যাপয়েন্টমেন্ট বুকিংয়ের জন্য কল শুরু করুন।"}
-        </p>
-
-        <button
-          onClick={status === CallStatus.ACTIVE ? handleStopCall : handleStartCall}
-          className={`w-full max-w-[280px] flex items-center justify-center gap-4 py-5 rounded-[2rem] font-black text-white transition-all shadow-2xl active:scale-95 transform hover:-translate-y-1 ${status === CallStatus.ACTIVE ? 'bg-red-500 shadow-red-200 hover:bg-red-600' : 'bg-emerald-600 shadow-emerald-200 hover:bg-emerald-700'}`}
-        >
-          <div className="scale-110">{status === CallStatus.ACTIVE ? ICON_PHONE_OFF : ICON_MIC}</div>
-          <span className="tracking-widest uppercase text-xs md:text-sm">{status === CallStatus.ACTIVE ? 'কল শেষ করুন' : 'কল শুরু করুন'}</span>
-        </button>
-      </section>
-
-      <section className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col h-[500px] md:h-auto overflow-hidden transition-all hover:shadow-xl hover:shadow-emerald-500/5">
-        <div className="p-7 border-b border-slate-50 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
-            <h3 className="font-black text-slate-800 text-xs md:text-sm uppercase tracking-widest">লাইভ ট্রান্সক্রিপ্ট</h3>
-          </div>
-          {status === CallStatus.ACTIVE && <span className="text-[10px] font-bold text-emerald-600 animate-pulse">রেকর্ড হচ্ছে...</span>}
-        </div>
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/30 custom-scrollbar">
-          {transcriptions.length === 0 && !activeUserText && !activeNiraText ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-40">
-               <div className="scale-[3] mb-10">
-                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-               </div>
-               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-center px-6">কথোপকথন এখানে দেখা যাবে</p>
+              <h4 className="text-base font-black uppercase tracking-widest text-slate-800">
+                {isEditing ? 'এন্ট্রি এডিট করুন' : 'নতুন তথ্য যোগ করুন'}
+              </h4>
             </div>
-          ) : (
-            <>
-              {transcriptions.map((t, i) => (
-                <div key={i} className={`flex flex-col ${t.role === 'user' ? 'items-end' : 'items-start'} animate-in fade-in slide-in-from-bottom-2`}>
-                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1 px-2">{t.role === 'user' ? 'আপনি' : 'নিরা'}</span>
-                  <div className={`max-w-[90%] rounded-2xl p-4 text-xs md:text-sm font-bold shadow-sm border ${t.role === 'user' ? 'bg-emerald-600 text-white border-emerald-700 rounded-tr-none' : 'bg-white text-slate-700 border-slate-100 rounded-tl-none'}`}>
-                    {t.text}
+            <form onSubmit={handleSubmit} className="space-y-5">
+              {activeDbTab === 'doctors' && (
+                <>
+                  <input name="name" defaultValue={currentItem?.name} placeholder="ডাক্তারের নাম" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" required />
+                  <input name="specialty" defaultValue={currentItem?.specialty} placeholder="বিশেষজ্ঞ (Specialty)" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" required />
+                  <input name="hospital" defaultValue={currentItem?.hospital} placeholder="হাসপাতালের নাম" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" required />
+                  <input name="contact" defaultValue={currentItem?.contact} placeholder="যোগাযোগ নম্বর" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" required />
+                </>
+              )}
+              {activeDbTab === 'diagnostics' && (
+                <>
+                  <input name="name" defaultValue={currentItem?.name} placeholder="সেন্টারের নাম" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" required />
+                  <input name="tests" defaultValue={currentItem?.tests} placeholder="টেস্টসমূহ (MRI, Blood Test)" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" required />
+                  <input name="location" defaultValue={currentItem?.location} placeholder="অবস্থান (Location)" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" required />
+                  <input name="contact" defaultValue={currentItem?.contact} placeholder="যোগাযোগ নম্বর" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" required />
+                </>
+              )}
+              {activeDbTab === 'hospitals' && (
+                <>
+                  <input name="name" defaultValue={currentItem?.name} placeholder="হাসপাতালের নাম" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" required />
+                  <input name="services" defaultValue={currentItem?.services} placeholder="সেবা (Services)" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" required />
+                  <input name="address" defaultValue={currentItem?.address} placeholder="ঠিকানা" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" required />
+                  <input name="emergency" defaultValue={currentItem?.emergency} placeholder="জরুরি যোগাযোগ নম্বর" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" required />
+                </>
+              )}
+              {activeDbTab === 'medicines' && (
+                <>
+                  <input name="name" defaultValue={currentItem?.name} placeholder="ঔষধের নাম" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" required />
+                  <input name="type" defaultValue={currentItem?.type} placeholder="ঔষধের ধরন (Tablet, Syrup)" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" required />
+                  <textarea name="indications" defaultValue={currentItem?.indications} placeholder="ব্যবহার বিধি / কেন সেবন করবেন (Indications)" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold min-h-[120px] outline-none focus:ring-4 focus:ring-blue-500/10 transition-all resize-none" required />
+                </>
+              )}
+              {activeDbTab === 'firstAid' && (
+                <>
+                  <input name="condition" defaultValue={currentItem?.condition} placeholder="সমস্যা (Condition)" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" required />
+                  <textarea name="instructions" defaultValue={currentItem?.instructions} placeholder="ফার্স্ট এইড নির্দেশনা" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold min-h-[150px] outline-none focus:ring-4 focus:ring-blue-500/10 transition-all resize-none" required />
+                </>
+              )}
+              <div className="flex gap-4 pt-4">
+                {isEditing && (
+                  <button type="button" onClick={() => setIsEditing(null)} className="flex-1 py-5 bg-slate-100 text-slate-500 rounded-3xl font-black text-xs uppercase tracking-widest border border-slate-200 hover:bg-slate-200 transition-all active:scale-95">বাতিল</button>
+                )}
+                <button type="submit" className="flex-[2] py-5 bg-blue-600 text-white rounded-3xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95">
+                  {isEditing ? 'তথ্য আপডেট করুন' : 'তথ্য সেভ করুন'}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* List View */}
+          <div className="space-y-6">
+            <div className="flex items-center justify-between sticky top-0 bg-white py-2 z-10 border-b border-slate-50 mb-4">
+              <h4 className="text-sm font-black uppercase tracking-widest text-slate-800">সংরক্ষিত তথ্য তালিকা</h4>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{db[activeDbTab].length} এন্ট্রি</span>
+            </div>
+            <div className="space-y-4 max-h-[600px] overflow-y-auto pr-3 custom-scrollbar">
+              {db[activeDbTab].length === 0 ? (
+                <div className="py-24 text-center text-slate-300 italic text-xs flex flex-col items-center gap-6">
+                  <div className="scale-[2.5] opacity-20">{ICON_DATABASE}</div>
+                  এই ক্যাটাগরিতে কোনো তথ্য পাওয়া যায়নি
+                </div>
+              ) : db[activeDbTab].map((item: any) => (
+                <div key={item.id} className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 relative group hover:bg-white hover:shadow-xl hover:shadow-blue-500/5 transition-all">
+                  <div className="absolute top-5 right-5 flex gap-3 opacity-0 group-hover:opacity-100 transition-all">
+                    <button 
+                      onClick={() => { setIsEditing(item.id); window.scrollTo({ top: 0, behavior: 'smooth' }); }} 
+                      className="p-3 text-blue-500 hover:text-white hover:bg-blue-500 bg-white rounded-xl border border-slate-100 shadow-sm transition-all"
+                      title="এডিট"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+                    </button>
+                    <button 
+                      onClick={() => deleteDbEntry(activeDbTab, item.id)} 
+                      className="p-3 text-red-500 hover:text-white hover:bg-red-500 bg-white rounded-xl border border-slate-100 shadow-sm transition-all"
+                      title="ডিলিট"
+                    >
+                      {ICON_TRASH}
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {Object.entries(item).map(([k, v]) => k !== 'id' && (
+                      <div key={k} className="flex gap-4 border-b border-slate-200/50 pb-2 last:border-0">
+                        <span className="text-[10px] font-black uppercase text-slate-400 w-28 pt-1 flex-shrink-0">{k}:</span>
+                        <span className="text-xs font-bold text-slate-800 leading-relaxed">{String(v)}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))}
-              {activeUserText && (
-                <div className="flex flex-col items-end opacity-70">
-                  <div className="max-w-[90%] rounded-2xl p-4 text-xs md:text-sm font-bold bg-emerald-50 text-emerald-800 border border-emerald-100 rounded-tr-none italic animate-pulse">
-                    {activeUserText}
-                  </div>
-                </div>
-              )}
-              {activeNiraText && (
-                <div className="flex flex-col items-start animate-in fade-in">
-                   <span className="text-[9px] font-black uppercase tracking-widest text-emerald-600 mb-1 px-2">নিরা বলছে...</span>
-                  <div className="max-w-[90%] rounded-2xl p-4 text-xs md:text-sm font-bold bg-white text-slate-500 border border-slate-100 rounded-tl-none shadow-sm flex items-center gap-2">
-                    {activeNiraText}
-                    <div className="w-1.5 h-4 bg-emerald-400 animate-pulse rounded-full"></div>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-          <div ref={lastTranscriptionRef} />
-        </div>
-      </section>
-
-      <section className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col h-[300px] md:h-auto overflow-hidden transition-all hover:shadow-xl hover:shadow-emerald-500/5">
-        <div className="p-7 border-b border-slate-50 flex items-center gap-3">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400"></div>
-          <h3 className="font-black text-slate-800 text-xs md:text-sm uppercase tracking-widest">ম্যাপ লোকেশন</h3>
-        </div>
-        <div className="flex-1 p-8 flex flex-col items-center justify-center text-slate-300 opacity-40 text-center">
-           <div className="scale-[3] mb-12 text-emerald-500/30">
-             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-           </div>
-           <p className="text-[10px] font-black uppercase tracking-[0.2em] leading-relaxed px-6">কাছাকাছি হাসপাতাল বা ডায়াগনস্টিক সেন্টারের ম্যাপ এখানে দেখা যাবে</p>
-        </div>
-      </section>
-
-      <section className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col h-[400px] md:h-auto overflow-hidden transition-all hover:shadow-xl hover:shadow-emerald-500/5">
-        <div className="p-7 border-b border-slate-50 flex items-center gap-3">
-          <div className="w-2.5 h-2.5 rounded-full bg-blue-500"></div>
-          <h3 className="font-black text-slate-800 text-xs md:text-sm uppercase tracking-widest">ওয়েবসাইট ও বিস্তারিত</h3>
-        </div>
-        <div className="flex-1 p-6 overflow-y-auto custom-scrollbar bg-slate-50/20">
-          {webResults.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-40 text-center">
-               <div className="scale-[3] mb-12 text-blue-500/30">
-                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-               </div>
-               <p className="text-[10px] font-black uppercase tracking-[0.2em] leading-relaxed px-6">টেস্টের খরচ বা প্রস্তুতির নিয়ম এখানে দেখা যাবে</p>
             </div>
-          ) : (
-            <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
-              {webResults.map((res, idx) => (
-                <div key={idx} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:border-blue-200 transition-all">
-                  <h4 className="text-blue-600 font-black text-xs md:text-sm mb-2">{res.title}</h4>
-                  <p className="text-slate-600 text-[11px] md:text-xs font-bold leading-relaxed">{res.snippet}</p>
-                </div>
-              ))}
-              <button 
-                onClick={() => setWebResults([])}
-                className="w-full py-2 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-red-500 transition-all"
-              >
-                Clear Results
-              </button>
-            </div>
-          )}
+          </div>
         </div>
-      </section>
-    </main>
-  );
+      </div>
+    );
+  };
 
   const renderAdmin = () => (
     <main className="flex-1 max-w-7xl mx-auto w-full p-6 md:p-12 animate-in fade-in duration-500">
@@ -471,83 +587,72 @@ const App: React.FC = () => {
           <form onSubmit={handleAdminLogin} className="space-y-8">
             <div className="space-y-3">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-4">পাসওয়ার্ড</label>
-              <input type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} placeholder="admin123" className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-emerald-500/10 transition-all" required />
+              <input type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} placeholder="admin123" className="w-full px-6 py-5 bg-slate-50 border border-slate-100 rounded-3xl text-sm font-bold outline-none focus:ring-4 focus:ring-emerald-500/10 transition-all" required />
             </div>
-            {loginError && <p className="text-red-500 text-xs font-black text-center">{loginError}</p>}
-            <button className="w-full py-5 bg-slate-800 text-white rounded-3xl font-black uppercase tracking-widest text-xs shadow-xl hover:bg-slate-700 transition-all">লগইন করুন</button>
+            {loginError && <p className="text-red-500 text-xs font-black text-center animate-shake">{loginError}</p>}
+            <button className="w-full py-5 bg-slate-800 text-white rounded-[2rem] font-black uppercase tracking-widest text-xs shadow-xl hover:bg-slate-700 transition-all active:scale-95">লগইন করুন</button>
           </form>
         </div>
       ) : (
         <div className="space-y-12">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
             <div>
-              <h2 className="text-3xl font-black text-slate-800">অ্যাডমিন ড্যাশবোর্ড</h2>
-              <p className="text-[10px] md:text-xs text-slate-400 font-bold uppercase tracking-[0.2em] mt-2">সিস্টেম কনফিগারেশন, সংগৃহীত লিড ও কল হিস্ট্রি</p>
+              <h2 className="text-4xl font-black text-slate-800 tracking-tight">অ্যাডমিন কন্ট্রোল সেন্টার</h2>
+              <p className="text-[10px] md:text-xs text-slate-400 font-black uppercase tracking-[0.3em] mt-3 opacity-80">DATABASE • LEADS • SYSTEM CONFIG</p>
             </div>
-            <button onClick={handleAdminLogout} className="px-8 py-3 bg-red-50 text-red-600 rounded-2xl text-xs font-black uppercase tracking-widest border border-red-100 hover:bg-red-100 transition-all">লগআউট</button>
+            <button onClick={handleAdminLogout} className="px-10 py-4 bg-red-50 text-red-600 rounded-[2rem] text-xs font-black uppercase tracking-widest border border-red-100 hover:bg-red-100 transition-all active:scale-95">লগআউট</button>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {/* Enhanced API Management Card */}
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col">
-               <div className="flex items-center gap-4 mb-8">
-                 <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">{ICON_SETTINGS}</div>
-                 <h4 className="text-sm font-black uppercase tracking-widest text-slate-700">API ও সিস্টেম কনফিগারেশন</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col min-h-[400px]">
+               <div className="flex items-center gap-4 mb-10">
+                 <div className="p-4 bg-emerald-50 text-emerald-600 rounded-2xl shadow-inner">{ICON_SETTINGS}</div>
+                 <h4 className="text-sm font-black uppercase tracking-widest text-slate-800">API কানেকশন</h4>
                </div>
-               
-               <div className="space-y-6">
-                 <div className={`p-5 rounded-2xl border ${isKeyAvailable ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-red-50 border-red-100 text-red-700'}`}>
-                    <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-60">বর্তমান সংযোগ অবস্থা</p>
-                    <p className="text-sm font-bold flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${isKeyAvailable ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></span>
-                      {isKeyAvailable ? 'API সংযুক্ত আছে' : 'API Key পাওয়া যায়নি'}
-                    </p>
+               <div className="space-y-6 flex-1">
+                 <div className={`p-6 rounded-[2rem] border ${isKeyAvailable ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-red-50 border-red-100 text-red-700'}`}>
+                    <p className="text-[10px] font-black uppercase tracking-widest mb-2 opacity-60">নেটওয়ার্ক স্ট্যাটাস</p>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-3 h-3 rounded-full ${isKeyAvailable ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
+                      <p className="text-sm font-black">{isKeyAvailable ? 'সিস্টেম কানেক্টেড' : 'API কি প্রয়োজন'}</p>
+                    </div>
                  </div>
-
-                 <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
-                    <h5 className="text-[11px] font-black uppercase tracking-widest text-slate-600 mb-3">কিভাবে API Key পাবেন:</h5>
-                    <ol className="text-[10px] md:text-xs text-slate-500 font-bold list-decimal pl-4 space-y-2">
-                      <li><a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="text-emerald-600 underline">ai.google.dev</a>-এ যান।</li>
-                      <li>আপনার Google অ্যাকাউন্টে লগইন করুন।</li>
-                      <li>একটি API Key তৈরি করুন (অবশ্যই Paid Project হতে হবে)।</li>
-                    </ol>
-                 </div>
-
-                 <div className="bg-blue-50 p-5 rounded-2xl border border-blue-100">
-                    <h5 className="text-[11px] font-black uppercase tracking-widest text-blue-700 mb-2">Vercel ডেপ্লয়মেন্ট গাইড:</h5>
-                    <p className="text-[10px] md:text-xs text-blue-600 font-medium leading-relaxed">
-                      প্রোডাকশনে অ্যাপটি ব্যবহারের জন্য আপনার Vercel ড্যাশবোর্ডে যান। 
-                      <b>Settings > Environment Variables</b>-এ <code>API_KEY</code> নামে আপনার কি-টি যুক্ত করুন।
-                    </p>
-                 </div>
+                 <p className="text-xs text-slate-400 font-bold leading-relaxed px-2">Gemini Live API সচল রাখার জন্য অবশ্যই একটি ভ্যালিড কি নির্বাচন করুন।</p>
                </div>
-
-               <button 
-                 onClick={handleKeySelection} 
-                 className="mt-8 w-full py-5 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95"
-               >
-                 কি আপডেট করুন (Secure Dialog)
-               </button>
+               <button onClick={handleKeySelection} className="mt-8 w-full py-5 bg-emerald-600 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95">সিস্টেম কি আপডেট করুন</button>
             </div>
 
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col h-[650px]">
-               <div className="flex items-center gap-4 mb-8">
-                 <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
-                 <h4 className="text-sm font-black uppercase tracking-widest text-slate-700">সংগৃহীত লিড ({patients.length})</h4>
+            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col h-[500px]">
+               <div className="flex items-center gap-4 mb-10">
+                 <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl shadow-inner">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                 </div>
+                 <h4 className="text-sm font-black uppercase tracking-widest text-slate-800">সংগৃহীত লিড ({patients.length})</h4>
                </div>
                <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
                  <table className="w-full text-left">
                    <tbody className="divide-y divide-slate-50">
                      {patients.length === 0 ? (
-                       <tr><td className="py-10 text-center text-slate-300 italic text-xs">কোনো লিড নেই</td></tr>
+                       <tr><td className="py-20 text-center text-slate-300 italic text-xs">কোনো লিড পাওয়া যায়নি</td></tr>
                      ) : patients.map(p => (
-                       <tr key={p.id} className="group">
-                         <td className="py-4">
+                       <tr key={p.id} className="group hover:bg-slate-50 transition-all">
+                         <td className="py-6">
                            <p className="text-sm font-black text-slate-800">{p.name}</p>
-                           <p className="text-[11px] text-slate-400 font-bold">{p.phone}</p>
+                           <p className="text-[11px] text-slate-400 font-bold mt-0.5">{p.phone}</p>
+                           <div className="mt-3">
+                             <select 
+                               value={p.status} 
+                               onChange={(e) => updateLeadStatus(p.id, e.target.value as any)} 
+                               className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-[10px] font-black shadow-sm outline-none focus:ring-4 focus:ring-blue-500/10"
+                             >
+                               <option value="new">NEW LEAD</option>
+                               <option value="contacted">CONTACTED</option>
+                               <option value="booked">BOOKED</option>
+                             </select>
+                           </div>
                          </td>
-                         <td className="py-4 text-right">
-                           <button onClick={() => deleteLead(p.id)} className="text-red-400 hover:text-red-600 p-2 opacity-0 group-hover:opacity-100 transition-all">{ICON_TRASH}</button>
+                         <td className="py-6 text-right align-top">
+                           <button onClick={() => deleteLead(p.id)} className="text-red-300 hover:text-red-500 p-3 opacity-0 group-hover:opacity-100 transition-all" title="লিড ডিলিট করুন">{ICON_TRASH}</button>
                          </td>
                        </tr>
                      ))}
@@ -556,25 +661,34 @@ const App: React.FC = () => {
                </div>
             </div>
 
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col h-[650px]">
-               <div className="flex items-center gap-4 mb-8">
-                 <div className="p-3 bg-slate-50 text-slate-600 rounded-2xl">{ICON_CLOCK}</div>
-                 <h4 className="text-sm font-black uppercase tracking-widest text-slate-700">কল হিস্ট্রি (অ্যাডমিন)</h4>
+            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col h-[500px]">
+               <div className="flex items-center gap-4 mb-10">
+                 <div className="p-4 bg-slate-50 text-slate-600 rounded-2xl shadow-inner">{ICON_CLOCK}</div>
+                 <h4 className="text-sm font-black uppercase tracking-widest text-slate-800">কল হিস্ট্রি সামারি</h4>
                </div>
-               <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                 <div className="space-y-4">
-                   {callHistory.length === 0 ? (
-                     <div className="py-10 text-center text-slate-300 italic text-xs">কোনো কল রেকর্ড নেই</div>
-                   ) : callHistory.map(h => (
-                     <div key={h.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 relative group">
-                        <button onClick={() => deleteHistory(h.id)} className="absolute top-2 right-2 text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all">{ICON_TRASH}</button>
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{new Date(h.timestamp).toLocaleString('bn-BD')}</p>
+               <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-5">
+                 {callHistory.length === 0 ? (
+                    <div className="py-20 text-center text-slate-300 italic text-xs">কল রেকর্ড পাওয়া যায়নি</div>
+                 ) : callHistory.map(h => (
+                   <div key={h.id} className="p-5 bg-slate-50 rounded-[2rem] border border-slate-100 relative group hover:bg-white transition-all">
+                      <button onClick={() => deleteHistory(h.id)} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 transition-all p-2">{ICON_TRASH}</button>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">{new Date(h.timestamp).toLocaleString('bn-BD')}</p>
+                      <div className="flex items-center gap-2">
+                        {h.summary === "সারাংশ তৈরি হচ্ছে..." && <LoadingSpinner size="w-3 h-3" color="text-slate-400" />}
                         <p className="text-[11px] font-bold text-slate-700 leading-relaxed">{h.summary}</p>
-                        <p className="text-[9px] font-black text-emerald-600 uppercase mt-2 tracking-widest">টার্ন সংখ্যা: {h.transcript.length}</p>
-                     </div>
-                   ))}
-                 </div>
+                      </div>
+                   </div>
+                 ))}
                </div>
+            </div>
+
+            {/* Health Database Manager */}
+            <div className="col-span-1 lg:col-span-3 pt-6">
+              <div className="flex items-center gap-4 mb-8">
+                <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl shadow-inner">{ICON_DATABASE}</div>
+                <h4 className="text-sm font-black uppercase tracking-widest text-slate-800">রিসোর্স ডাটাবেস (Healthcare Network)</h4>
+              </div>
+              {renderDbTabContent()}
             </div>
           </div>
         </div>
@@ -582,176 +696,382 @@ const App: React.FC = () => {
     </main>
   );
 
-  const renderHistory = () => (
-    <main className="flex-1 max-w-4xl mx-auto w-full p-6 md:p-12 animate-in fade-in duration-500">
-      <div className="flex items-center justify-between mb-10">
-        <div>
-          <h2 className="text-3xl font-black text-slate-800">কল হিস্ট্রি</h2>
-          <p className="text-[10px] md:text-xs text-slate-400 font-bold uppercase tracking-[0.2em] mt-2">আপনার সাথে নিরার সকল কথোপকথন</p>
+  const renderAssistant = () => (
+    <main className="flex-1 max-w-[1600px] mx-auto w-full p-4 md:p-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 animate-in fade-in duration-500 relative">
+      <section className="bg-white rounded-[3rem] shadow-sm border border-slate-100 p-10 flex flex-col items-center justify-center text-center group relative min-h-[450px] transition-all hover:shadow-2xl hover:shadow-emerald-500/5">
+        {lastSavedPatient && (
+          <div className="absolute top-8 left-1/2 -translate-x-1/2 w-[90%] bg-emerald-600 text-white py-4 px-6 rounded-3xl text-[11px] font-black uppercase tracking-widest animate-in slide-in-from-top-6 shadow-2xl z-20 flex items-center justify-center gap-3">
+            <div className="w-2.5 h-2.5 bg-white rounded-full animate-ping"></div>
+            সফল বুকিং: {lastSavedPatient}
+          </div>
+        )}
+        
+        <div className={`w-48 h-48 md:w-64 md:h-64 rounded-full flex items-center justify-center mb-12 transition-all duration-1000 ${status === CallStatus.ACTIVE ? 'bg-emerald-50 scale-110 shadow-[inset_0_2px_10px_rgba(16,185,129,0.1)]' : status === CallStatus.CONNECTING ? 'bg-emerald-50' : 'bg-slate-50'}`}>
+          <div className={`scale-[2.5] md:scale-[3.5] transition-all duration-700 ${status === CallStatus.ACTIVE ? 'text-emerald-600' : status === CallStatus.CONNECTING ? 'text-emerald-500' : 'text-slate-300 group-hover:scale-[3.8] group-hover:text-slate-400'}`}>
+            {status === CallStatus.ACTIVE ? (
+              <div className="flex gap-1.5 items-end">
+                <div className="w-2.5 h-10 bg-emerald-500 rounded-full animate-bounce [animation-duration:1.1s]"></div>
+                <div className="w-2.5 h-20 bg-emerald-500 rounded-full animate-bounce [animation-duration:0.9s]"></div>
+                <div className="w-2.5 h-14 bg-emerald-500 rounded-full animate-bounce [animation-duration:1.3s]"></div>
+                <div className="w-2.5 h-18 bg-emerald-500 rounded-full animate-bounce [animation-duration:1.0s]"></div>
+              </div>
+            ) : status === CallStatus.CONNECTING ? (
+              <LoadingSpinner size="w-16 h-16" color="text-emerald-600" />
+            ) : ICON_MIC}
+          </div>
         </div>
-        <button onClick={() => setView('assistant')} className="px-6 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-xs font-black uppercase tracking-widest border border-emerald-100 hover:bg-emerald-100 transition-all">ফিরে যান</button>
+        
+        <div className="space-y-3 mb-12">
+          <h2 className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">
+            {status === CallStatus.IDLE && "নিরার সাথে কথা বলুন"}
+            {status === CallStatus.CONNECTING && "সংযোগ হচ্ছে..."}
+            {status === CallStatus.ACTIVE && "নিরা শুনছে..."}
+            {status === CallStatus.ERROR && "সংযোগ ত্রুটি"}
+          </h2>
+          <p className="text-slate-400 text-xs md:text-sm font-bold max-w-[280px] mx-auto leading-relaxed opacity-70">
+            {status === CallStatus.ERROR ? error : status === CallStatus.CONNECTING ? "Gemini Live API এর সাথে সংযুক্ত হওয়া হচ্ছে" : "আপনার মেডিকেল অ্যাপয়েন্টমেন্ট বা তথ্যের জন্য কল বাটন চাপুন।"}
+          </p>
+        </div>
+
+        <button
+          onClick={status === CallStatus.ACTIVE ? handleStopCall : handleStartCall}
+          className={`w-full max-w-[300px] flex items-center justify-center gap-5 py-6 rounded-[2.5rem] font-black text-white transition-all shadow-2xl active:scale-95 transform hover:-translate-y-1.5 ${status === CallStatus.ACTIVE ? 'bg-red-500 shadow-red-200 hover:bg-red-600' : 'bg-emerald-600 shadow-emerald-200 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed'}`}
+          disabled={status === CallStatus.CONNECTING}
+        >
+          <div className="scale-125">{status === CallStatus.ACTIVE ? ICON_PHONE_OFF : ICON_MIC}</div>
+          <span className="tracking-[0.2em] uppercase text-xs md:text-sm">{status === CallStatus.ACTIVE ? 'কল শেষ করুন' : status === CallStatus.CONNECTING ? 'অপেক্ষা করুন' : 'কল শুরু করুন'}</span>
+        </button>
+      </section>
+
+      <section className="bg-white rounded-[3rem] shadow-sm border border-slate-100 flex flex-col h-[500px] md:h-auto overflow-hidden transition-all hover:shadow-2xl hover:shadow-emerald-500/5">
+        <div className="p-8 border-b border-slate-50 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></div>
+            <h3 className="font-black text-slate-800 text-xs md:text-sm uppercase tracking-[0.2em]">লাইভ ট্রান্সক্রিপ্ট</h3>
+          </div>
+          {status === CallStatus.ACTIVE && <span className="text-[10px] font-black text-emerald-600 animate-pulse tracking-widest uppercase">রেকর্ডিং</span>}
+        </div>
+        <div className="flex-1 overflow-y-auto p-8 space-y-8 bg-slate-50/20 custom-scrollbar">
+          {transcriptions.length === 0 && !activeUserText && !activeNiraText ? (
+            <div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-30 text-center">
+               <div className="scale-[4] mb-12"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+               <p className="text-[11px] font-black uppercase tracking-[0.3em] px-10 leading-relaxed">কথোপকথন এখানে রিয়েল-টাইমে দেখা যাবে</p>
+            </div>
+          ) : (
+            <>
+              {transcriptions.map((t, i) => (
+                <div key={i} className={`flex flex-col ${t.role === 'user' ? 'items-end' : 'items-start'} animate-in fade-in slide-in-from-bottom-3`}>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2 px-3">{t.role === 'user' ? 'আপনি' : 'নিরা'}</span>
+                  <div className={`max-w-[85%] rounded-[1.5rem] p-5 text-sm font-bold shadow-sm border ${t.role === 'user' ? 'bg-emerald-600 text-white border-emerald-700 rounded-tr-none' : 'bg-white text-slate-700 border-slate-100 rounded-tl-none'}`}>
+                    {t.text}
+                  </div>
+                </div>
+              ))}
+              {activeUserText && <div className="flex flex-col items-end opacity-60"><div className="max-w-[85%] rounded-[1.5rem] p-5 text-sm font-bold bg-emerald-50 text-emerald-800 border border-emerald-100 rounded-tr-none italic animate-pulse">{activeUserText}</div></div>}
+              {activeNiraText && <div className="flex flex-col items-start animate-in fade-in"><span className="text-[9px] font-black uppercase tracking-widest text-emerald-600 mb-2 px-3">নিরা বলছে...</span><div className="max-w-[85%] rounded-[1.5rem] p-5 text-sm font-bold bg-white text-slate-500 border border-slate-100 rounded-tl-none shadow-sm flex items-center gap-3">{activeNiraText}<div className="w-1.5 h-5 bg-emerald-400 animate-pulse rounded-full"></div></div></div>}
+            </>
+          )}
+          <div ref={lastTranscriptionRef} />
+        </div>
+      </section>
+
+      <section className="bg-white rounded-[3rem] shadow-sm border border-slate-100 flex flex-col h-[350px] md:h-auto overflow-hidden transition-all hover:shadow-2xl hover:shadow-emerald-500/5">
+        <div className="p-8 border-b border-slate-50 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-3 h-3 rounded-full bg-emerald-400"></div>
+            <h3 className="font-black text-slate-800 text-xs md:text-sm uppercase tracking-[0.2em]">রিসোর্স ও নেটওয়ার্ক</h3>
+          </div>
+          {isSearchingInternal && <LoadingSpinner size="w-4 h-4" color="text-emerald-500" />}
+        </div>
+        <div className="flex-1 p-6 overflow-y-auto custom-scrollbar bg-slate-50/10">
+           {isSearchingInternal ? (
+              <div className="h-full flex flex-col items-center justify-center space-y-4 animate-pulse">
+                <LoadingSpinner size="w-10 h-10" color="text-emerald-500/30" />
+                <p className="text-[10px] font-black text-emerald-600/50 uppercase tracking-widest">ডাটাবেস অনুসন্ধান করা হচ্ছে...</p>
+              </div>
+           ) : internalResults.length === 0 ? (
+             <div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-30 text-center">
+               <div className="scale-[4] mb-16 text-emerald-500/20">
+                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+               </div>
+               <p className="text-[11px] font-black uppercase tracking-[0.3em] leading-relaxed px-8">আমাদের নেটওয়ার্কের ডাক্তার বা তথ্য এখানে দেখা যাবে</p>
+             </div>
+           ) : (
+             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+               {internalResults.map((item, idx) => (
+                 <div key={idx} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                    {Object.entries(item).map(([k, v]) => k !== 'id' && (
+                      <div key={k} className="flex gap-2 border-b border-slate-50 last:border-0 pb-1.5 mb-1.5 last:pb-0 last:mb-0">
+                        <span className="text-[9px] font-black uppercase text-slate-400 w-20 flex-shrink-0 pt-0.5">{k}:</span>
+                        <span className="text-xs font-bold text-slate-700">{String(v)}</span>
+                      </div>
+                    ))}
+                 </div>
+               ))}
+               <button onClick={() => setInternalResults([])} className="w-full py-2 text-[9px] font-black uppercase tracking-widest text-slate-400 hover:text-red-500 transition-all">ফলাফল মুছুন</button>
+             </div>
+           )}
+        </div>
+      </section>
+
+      <section className="bg-white rounded-[3rem] shadow-sm border border-slate-100 flex flex-col h-[450px] md:h-auto overflow-hidden transition-all hover:shadow-2xl hover:shadow-emerald-500/5">
+        <div className="p-8 border-b border-slate-50 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+            <h3 className="font-black text-slate-800 text-xs md:text-sm uppercase tracking-[0.2em]">ইন্টারনেট রিসার্চ</h3>
+          </div>
+          {isSearchingWeb && <LoadingSpinner size="w-4 h-4" color="text-blue-500" />}
+        </div>
+        <div className="flex-1 p-8 overflow-y-auto custom-scrollbar bg-slate-50/10">
+          {isSearchingWeb ? (
+             <div className="h-full flex flex-col items-center justify-center space-y-4 animate-pulse">
+               <LoadingSpinner size="w-10 h-10" color="text-blue-500/30" />
+               <p className="text-[10px] font-black text-blue-600/50 uppercase tracking-widest">ওয়েব সার্চ করা হচ্ছে...</p>
+             </div>
+          ) : webResults.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-30 text-center">
+               <div className="scale-[4] mb-16 text-blue-500/20">
+                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+               </div>
+               <p className="text-[11px] font-black uppercase tracking-[0.3em] leading-relaxed px-8">ওয়েব থেকে প্রাপ্ত খরচ বা প্রস্তুতির তথ্য এখানে দেখা যাবে</p>
+            </div>
+          ) : (
+            <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+              {webResults.map((res, idx) => (
+                <div key={idx} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hover:border-blue-200 transition-all">
+                  <h4 className="text-blue-600 font-black text-sm mb-3 tracking-tight">{res.title}</h4>
+                  <p className="text-slate-600 text-xs font-bold leading-relaxed">{res.snippet}</p>
+                </div>
+              ))}
+              <button onClick={() => setWebResults([])} className="w-full py-2 text-[9px] font-black uppercase tracking-widest text-slate-400 hover:text-red-500 transition-all">ফলাফল মুছুন</button>
+            </div>
+          )}
+        </div>
+      </section>
+      
+      {renderConfirmationModal()}
+    </main>
+  );
+
+  const renderHistory = () => (
+    <main className="flex-1 max-w-5xl mx-auto w-full p-6 md:p-12 animate-in fade-in duration-500">
+      <div className="flex items-center justify-between mb-12">
+        <div>
+          <h2 className="text-4xl font-black text-slate-800 tracking-tight">কল হিস্ট্রি</h2>
+          <p className="text-[10px] md:text-xs text-slate-400 font-black uppercase tracking-[0.3em] mt-3 opacity-80">YOUR CONVERSATIONS • SUMMARIES</p>
+        </div>
+        <button 
+          onClick={() => {
+            if (selectedHistory) setSelectedHistory(null);
+            else setView('assistant');
+          }} 
+          className="px-10 py-4 bg-emerald-50 text-emerald-600 rounded-[2rem] text-xs font-black uppercase tracking-widest border border-emerald-100 hover:bg-emerald-100 transition-all active:scale-95"
+        >
+          ফিরে যান
+        </button>
       </div>
 
-      {callHistory.length === 0 ? (
-        <div className="bg-white rounded-[3rem] p-20 flex flex-col items-center justify-center text-center shadow-sm border border-slate-100">
-          <div className="scale-[3] mb-12 text-slate-200">{ICON_CLOCK}</div>
-          <p className="text-sm font-black uppercase tracking-[0.2em] text-slate-400">এখন পর্যন্ত কোনো কথা হয়নি</p>
-          <button onClick={() => setView('assistant')} className="mt-8 px-8 py-4 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-100">কথা বলা শুরু করুন</button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {callHistory.map(h => (
-            <div key={h.id} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl hover:shadow-emerald-500/5 transition-all group animate-in slide-in-from-bottom-4">
-              <div className="flex items-center justify-between mb-6">
-                <div className="px-3 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-black rounded-lg uppercase tracking-widest flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full"></div>
+      {!selectedHistory ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          {callHistory.length === 0 ? (
+            <div className="col-span-full py-32 text-center text-slate-300 font-black uppercase tracking-[0.4em] opacity-30">কোনো কল রেকর্ড নেই</div>
+          ) : callHistory.map(h => (
+            <div key={h.id} className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-2xl hover:shadow-emerald-500/5 transition-all group animate-in slide-in-from-bottom-6">
+              <div className="flex items-center justify-between mb-8">
+                <div className="px-4 py-1.5 bg-emerald-50 text-emerald-600 text-[10px] font-black rounded-xl uppercase tracking-widest border border-emerald-100">
                   কল শেষ
                 </div>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(h.timestamp).toLocaleDateString('bn-BD')} | {new Date(h.timestamp).toLocaleTimeString('bn-BD')}</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(h.timestamp).toLocaleString('bn-BD')}</p>
               </div>
-              <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-2">সারাংশ (Summary)</h4>
-              <p className="text-sm md:text-base font-bold text-slate-700 leading-relaxed mb-6">{h.summary}</p>
-              <div className="pt-6 border-t border-slate-50 flex items-center justify-between">
-                 <button className="text-[10px] font-black uppercase tracking-widest text-emerald-600 hover:opacity-70 flex items-center gap-2 group/btn">
-                    বিস্তারিত দেখুন <span className="group-hover/btn:translate-x-1 transition-transform">→</span>
+              <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3 opacity-60">সারাংশ (Summary)</h4>
+              <div className="flex items-center gap-3 mb-10 min-h-[4rem]">
+                {h.summary === "সারাংশ তৈরি হচ্ছে..." ? (
+                  <div className="flex items-center gap-2">
+                    <LoadingSpinner size="w-4 h-4" color="text-slate-400" />
+                    <span className="text-xs text-slate-400 font-bold italic">সারাংশ তৈরি করা হচ্ছে...</span>
+                  </div>
+                ) : (
+                  <p className="text-base font-bold text-slate-700 leading-relaxed">{h.summary}</p>
+                )}
+              </div>
+              <div className="pt-8 border-t border-slate-50 flex items-center justify-between">
+                 <button 
+                    onClick={() => setSelectedHistory(h)}
+                    className="text-[10px] font-black uppercase tracking-widest text-emerald-600 hover:opacity-70 flex items-center gap-3 group/btn"
+                 >
+                    বিস্তারিত দেখুন <span className="group-hover/btn:translate-x-1.5 transition-transform duration-300">→</span>
                  </button>
-                 <button onClick={() => deleteHistory(h.id)} className="p-2 text-slate-300 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100">
+                 <button onClick={() => deleteHistory(h.id)} className="p-3 text-slate-300 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 bg-slate-50 rounded-xl" title="কল মুছুন">
                     {ICON_TRASH}
                  </button>
               </div>
             </div>
           ))}
         </div>
+      ) : (
+        <div className="bg-white rounded-[3rem] shadow-xl border border-slate-100 overflow-hidden animate-in slide-in-from-right-10 duration-500">
+           <div className="p-10 md:p-14 border-b border-slate-100 bg-slate-50/30">
+              <div className="flex items-center justify-between mb-6">
+                 <h3 className="text-2xl font-black text-slate-800">কলের বিস্তারিত</h3>
+                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(selectedHistory.timestamp).toLocaleString('bn-BD')}</p>
+              </div>
+              <p className="text-sm font-bold text-slate-600 leading-relaxed max-w-3xl italic">
+                “{selectedHistory.summary}”
+              </p>
+           </div>
+           <div className="p-10 md:p-14 space-y-10 max-h-[600px] overflow-y-auto custom-scrollbar">
+              {selectedHistory.transcript.map((t, i) => (
+                <div key={i} className={`flex flex-col ${t.role === 'user' ? 'items-end' : 'items-start'} animate-in fade-in`}>
+                   <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2 px-3">
+                     {t.role === 'user' ? 'আপনি' : 'নিরা'}
+                   </span>
+                   <div className={`max-w-[85%] rounded-[1.5rem] p-5 text-sm font-bold shadow-sm border ${t.role === 'user' ? 'bg-emerald-600 text-white border-emerald-700 rounded-tr-none' : 'bg-white text-slate-700 border-slate-100 rounded-tl-none'}`}>
+                     {t.text}
+                   </div>
+                </div>
+              ))}
+           </div>
+           <div className="p-10 bg-slate-50 flex justify-center">
+              <button 
+                onClick={() => setSelectedHistory(null)}
+                className="px-12 py-4 bg-slate-800 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-slate-700 transition-all active:scale-95"
+              >
+                হিস্ট্রি তালিকায় ফিরে যান
+              </button>
+           </div>
+        </div>
       )}
     </main>
   );
 
   const renderGuide = () => (
-    <main className="flex-1 max-w-4xl mx-auto w-full p-6 md:p-12 animate-in slide-in-from-bottom-6 duration-700">
-      <div className="bg-white rounded-[3rem] shadow-2xl border border-slate-100 overflow-hidden">
-        <div className="bg-emerald-600 p-10 md:p-16 text-white">
-          <h2 className="text-3xl md:text-5xl font-black mb-4 tracking-tight">ইউজার গাইড</h2>
-          <p className="text-emerald-100 font-bold opacity-90 text-sm md:text-base leading-relaxed">সহায়তা সহকারী 'নিরা' এর সকল ফিচার এবং ব্যবহারের নিয়মাবলী এখানে বিস্তারিত আলোচনা করা হয়েছে।</p>
+    <main className="flex-1 max-w-5xl mx-auto w-full p-6 md:p-12 animate-in fade-in zoom-in-95 duration-500">
+      <div className="bg-white rounded-[4rem] border border-slate-100 shadow-2xl overflow-hidden">
+        {/* Guide Header */}
+        <div className="bg-gradient-to-br from-emerald-600 to-emerald-800 p-12 md:p-20 text-white text-center">
+          <div className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-3xl flex items-center justify-center mx-auto mb-10 shadow-inner">
+             <div className="scale-[2]">{ICON_INFO}</div>
+          </div>
+          <h2 className="text-4xl md:text-5xl font-black mb-6 tracking-tight">নির্দেশিকা ও সহায়িকা (Guide)</h2>
+          <p className="text-emerald-100/80 font-bold text-sm md:text-lg max-w-2xl mx-auto leading-relaxed uppercase tracking-widest">নিরার সকল ফিচারের সঠিক ব্যবহারের নির্দেশনাবলী</p>
         </div>
-        
-        <div className="p-8 md:p-16 space-y-12 md:space-y-16">
-          <section className="space-y-6">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center font-black">০১</div>
-              <h3 className="text-xl md:text-2xl font-black text-slate-800">অ্যাপয়েন্টমেন্ট বুকিং (Booking)</h3>
-            </div>
-            <div className="pl-16 space-y-4">
-              <p className="text-slate-600 font-bold text-sm leading-relaxed">টেলিমেডিসিন অ্যাপয়েন্টমেন্টের জন্য নিরার সাথে কথা বলুন। বুকিং সম্পন্ন করতে নিচের তথ্যগুলো তৈরি রাখুন:</p>
-              <ul className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {['রোগীর পূর্ণ নাম', 'সচল মোবাইল নম্বর', 'ইমেইল ঠিকানা'].map((item, idx) => (
-                  <li key={idx} className="bg-slate-50 p-4 rounded-xl text-xs font-black text-slate-700 flex items-center gap-3">
-                    <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </section>
 
-          <section className="space-y-6">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center font-black">০২</div>
-              <h3 className="text-xl md:text-2xl font-black text-slate-800">ডায়াগনস্টিক তথ্য (Diagnostics)</h3>
-            </div>
-            <div className="pl-16 space-y-4">
-              <p className="text-slate-600 font-bold text-sm leading-relaxed">যেকোনো মেডিকেল টেস্টের খরচ এবং প্রস্তুতির নিয়ম জানতে নিরাকে জিজ্ঞেস করুন। যেমন:</p>
-              <div className="bg-slate-800 p-6 rounded-2xl space-y-3">
-                <p className="text-emerald-400 text-xs font-black tracking-widest uppercase">ব্যবহারকারীর উদাহরণ:</p>
-                <p className="text-white font-bold italic text-sm md:text-base">"রক্ত পরীক্ষার জন্য কি খালি পেটে থাকতে হবে?"</p>
-                <p className="text-white font-bold italic text-sm md:text-base">"ঢাকার ল্যাব এইডে এমআরআই টেস্টের খরচ কত?"</p>
+        {/* Guide Content */}
+        <div className="p-10 md:p-20 space-y-20">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+            {/* Capability 1 */}
+            <section className="space-y-6 group">
+              <div className="flex items-center gap-5">
+                <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform">
+                   {ICON_HEART}
+                </div>
+                <h3 className="text-xl font-black text-slate-800">অ্যাপয়েন্টমেন্ট বুকিং</h3>
               </div>
-            </div>
-          </section>
+              <p className="text-slate-500 text-sm font-bold leading-relaxed ml-1 pt-2">
+                নিরা আপনার জন্য ডাক্তার বা ডায়াগনস্টিক অ্যাপয়েন্টমেন্ট বুক করতে পারে। কথা বলার সময় তাকে শুধু বলুন আপনি কার সাথে অ্যাপয়েন্টমেন্ট করতে চান। নিরা আপনার নাম, ফোন নম্বর এবং ইমেইল ঠিকানা সংগ্রহ করার পর স্ক্রিনে একটি কনফার্মেশন পপ-আপ দেখাবে।
+              </p>
+              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 text-[11px] font-black text-emerald-700 uppercase tracking-widest">
+                টিপস: "আমি একজন হার্ট স্পেশালিস্টের সাথে অ্যাপয়েন্টমেন্ট করতে চাই" - এভাবে শুরু করুন।
+              </div>
+            </section>
 
-          <section className="space-y-6">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-slate-50 text-slate-600 rounded-2xl flex items-center justify-center font-black">০৩</div>
-              <h3 className="text-xl md:text-2xl font-black text-slate-800">কল হিস্ট্রি (Call History)</h3>
-            </div>
-            <div className="pl-16 space-y-4">
-              <p className="text-slate-600 font-bold text-sm leading-relaxed">আপনার সকল কথোপকথন স্বয়ংক্রিয়ভাবে সংরক্ষিত হয়। ঘড়ি আইকন ({ICON_CLOCK}) এ ক্লিক করে আপনি পূর্বের কলের সারাংশ দেখে নিতে পারেন।</p>
-            </div>
-          </section>
+            {/* Capability 2 */}
+            <section className="space-y-6 group">
+              <div className="flex items-center gap-5">
+                <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform">
+                   {ICON_DATABASE}
+                </div>
+                <h3 className="text-xl font-black text-slate-800">রিসোর্স ও ডাক্তার খোঁজা</h3>
+              </div>
+              <p className="text-slate-500 text-sm font-bold leading-relaxed ml-1 pt-2">
+                আমাদের নেটওয়ার্কে থাকা সেরা ডাক্তার, হাসপাতাল এবং ঔষধের তথ্য নিরা নিমেষেই খুঁজে দেবে। যদি আমাদের ডাটাবেসে তথ্য না থাকে, তবে সে ইন্টারনেট (Web Search) ব্যবহার করে আপনাকে টেস্টের সম্ভাব্য খরচ এবং প্রস্তুতির নিয়ম জানাবে।
+              </p>
+              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 text-[11px] font-black text-blue-700 uppercase tracking-widest">
+                টিপস: "ঢাকার আশেপাশে কোনো ভালো ব্লাড ব্যাংক আছে?" - জিজ্ঞাসা করুন।
+              </div>
+            </section>
+          </div>
 
-          <section className="space-y-8 pt-8 border-t border-slate-100">
-            <h3 className="text-2xl font-black text-slate-800 text-center">সচরাচর জিজ্ঞাসিত প্রশ্নাবলী (FAQ)</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <hr className="border-slate-100" />
+
+          {/* FAQ Section */}
+          <section className="space-y-12">
+            <h3 className="text-3xl font-black text-slate-800 text-center tracking-tight">সচরাচর জিজ্ঞাসিত প্রশ্নাবলী (FAQ)</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               {[
-                {q: "নিরা কি বাংলায় কথা বলতে পারে?", a: "হ্যাঁ, নিরা সম্পূর্ণ বাংলায় এবং অত্যন্ত শুদ্ধভাবে আপনার সাথে কথা বলতে সক্ষম।"},
-                {q: "মাইক্রোফোন কাজ না করলে কি করব?", a: "ব্রাউজারের সেটিংস থেকে মাইক্রোফোন পারমিশন চেক করুন এবং ইন্টারনেটের স্পিড নিশ্চিত করুন।"},
-                {q: "বুকিং ডেটা কোথায় সংরক্ষিত হয়?", a: "আপনার তথ্যসমূহ সাময়িকভাবে লোকাল স্টোরেজে রাখা হয় এবং অ্যাডমিন ড্যাশবোর্ড থেকে তা দেখা যায়।"},
-                {q: "নিরা কি ঔষধের নাম বলতে পারে?", a: "না, নিরা কোনো প্রকার মেডিকেল প্রেসক্রিপশন বা ঔষধের নাম পরামর্শ প্রদান করে না।" }
+                {
+                  q: "নিরা কি বাংলায় কথা বলতে পারে?",
+                  a: "হ্যাঁ, নিরা সম্পূর্ণ বাংলায় এবং অত্যন্ত শুদ্ধভাবে আপনার সাথে কথা বলতে সক্ষম।"
+                },
+                {
+                  q: "বুকিং করার জন্য কি কি তথ্য প্রয়োজন?",
+                  a: "বুকিং নিশ্চিত করার জন্য ব্যবহারকারীর নাম, একটি সচল ফোন নম্বর এবং একটি ইমেইল ঠিকানা প্রয়োজন।"
+                },
+                {
+                  q: "কল হিস্ট্রি কি চিরস্থায়ী?",
+                  a: "না, আপনার কথোপকথন ব্রাউজারের লোকাল স্টোরেজে জমা থাকে। ক্যাশে ডিলিট করলে বা 'কল মুছুন' বাটন চাপলে তা মুছে যাবে।"
+                },
+                {
+                  q: "নিরা কি ঔষধের পরামর্শ দিতে পারে?",
+                  a: "নিরা কোনো প্রেসক্রিপশন প্রদান করে না। তবে সে ঔষধের সাধারণ ব্যবহার এবং ডায়াগনস্টিক প্রস্তুতির তথ্য দিতে পারে।"
+                }
               ].map((faq, idx) => (
-                <div key={idx} className="p-6 bg-slate-50 rounded-3xl space-y-3 border border-slate-100 hover:border-emerald-200 transition-all">
-                  <h4 className="font-black text-slate-800 text-sm">প্রশ্ন: {faq.q}</h4>
-                  <p className="text-xs text-slate-500 font-bold leading-relaxed">উত্তর: {faq.a}</p>
+                <div key={idx} className="p-8 bg-slate-50/50 rounded-[2.5rem] border border-slate-100 hover:bg-white hover:shadow-xl hover:shadow-emerald-500/5 transition-all">
+                  <h4 className="text-sm font-black text-slate-800 mb-3 flex items-start gap-3">
+                    <span className="text-emerald-600">প্রশ্ন:</span> {faq.q}
+                  </h4>
+                  <p className="text-xs font-bold text-slate-500 leading-relaxed pl-10">
+                    {faq.a}
+                  </p>
                 </div>
               ))}
             </div>
           </section>
 
-          <button onClick={() => setView('assistant')} className="w-full py-5 bg-emerald-600 text-white rounded-3xl font-black uppercase tracking-[0.2em] shadow-xl hover:bg-emerald-700 transition-all">কল করতে ফিরে যান</button>
+          <button 
+            onClick={() => setView('assistant')} 
+            className="w-full py-6 bg-emerald-600 text-white rounded-3xl font-black uppercase tracking-[0.3em] shadow-2xl shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95 text-sm"
+          >
+            কল শুরু করতে ফিরে যান
+          </button>
         </div>
       </div>
     </main>
   );
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 font-sans text-slate-900 overflow-x-hidden selection:bg-emerald-100">
-      <header className="w-full bg-white border-b border-slate-200 px-4 md:px-10 py-4 flex flex-col sm:flex-row items-center justify-between gap-4 sticky top-0 z-50">
-        <div className="flex items-center gap-4 cursor-pointer" onClick={() => setView('assistant')}>
-          <div className="w-12 h-12 bg-emerald-600 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-100">
-            <div className="scale-125 brightness-0 invert">{ICON_HEART}</div>
+    <div className="min-h-screen flex flex-col bg-[#fcfdfe] font-sans text-slate-900 overflow-x-hidden selection:bg-emerald-100">
+      <header className="w-full bg-white/80 backdrop-blur-xl border-b border-slate-200 px-6 md:px-12 py-5 flex flex-col sm:flex-row items-center justify-between gap-6 sticky top-0 z-[60]">
+        <div className="flex items-center gap-5 cursor-pointer group" onClick={() => setView('assistant')}>
+          <div className="w-14 h-14 bg-emerald-600 rounded-[1.5rem] flex items-center justify-center shadow-xl shadow-emerald-100 group-hover:rotate-12 transition-all duration-500">
+            <div className="scale-150 brightness-0 invert">{ICON_HEART}</div>
           </div>
           <div className="flex flex-col">
-            <h1 className="text-xl md:text-2xl font-black text-slate-800 tracking-tight leading-none">হেলথ সাপোর্ট</h1>
-            <p className="text-[10px] md:text-xs text-slate-500 font-bold uppercase tracking-wider opacity-80 mt-1">ভার্চুয়াল সহকারী: নিরা</p>
+            <h1 className="text-2xl font-black text-slate-800 tracking-tighter leading-none">হেলথ সাপোর্ট সেন্টার</h1>
+            <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest opacity-80 mt-1.5">ভার্চুয়াল সহকারী: নিরা</p>
           </div>
         </div>
-        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
-          <div className="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-full text-[10px] font-black flex items-center gap-2 shadow-sm border border-emerald-100">
-            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-            অনলাইন
-          </div>
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={() => setView('history')}
-              className={`p-3 rounded-xl transition-all ${view === 'history' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}
-              title="কল হিস্ট্রি"
-            >
-              {ICON_CLOCK}
-            </button>
-            <button 
-              onClick={() => setView('guide')}
-              className={`p-3 rounded-xl transition-all ${view === 'guide' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}
-              title="ইউজার গাইড"
-            >
-              {ICON_INFO}
-            </button>
-            <button 
-              onClick={() => setView(view === 'admin' ? 'assistant' : 'admin')}
-              className={`p-3 rounded-xl transition-all ${view === 'admin' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}
-              title="অ্যাডমিন"
-            >
-              {ICON_SETTINGS}
-            </button>
-          </div>
+        <div className="flex items-center gap-3">
+          <button onClick={() => { setView('history'); setSelectedHistory(null); }} className={`px-6 py-3 rounded-2xl transition-all flex items-center gap-3 font-black text-[11px] uppercase tracking-widest ${view === 'history' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`} title="কল হিস্ট্রি">
+            {ICON_CLOCK} <span className="hidden md:inline">হিস্ট্রি</span>
+          </button>
+          <button onClick={() => setView('guide')} className={`px-6 py-3 rounded-2xl transition-all flex items-center gap-3 font-black text-[11px] uppercase tracking-widest ${view === 'guide' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`} title="ইউজার গাইড">
+            {ICON_INFO} <span className="hidden md:inline">গাইড</span>
+          </button>
+          <button onClick={() => setView(view === 'admin' ? 'assistant' : 'admin')} className={`px-6 py-3 rounded-2xl transition-all flex items-center gap-3 font-black text-[11px] uppercase tracking-widest ${view === 'admin' ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50 border border-transparent hover:border-slate-100'}`} title="অ্যাডমিন">
+            {ICON_SETTINGS} <span className="hidden md:inline">অ্যাডমিন</span>
+          </button>
         </div>
       </header>
 
       {view === 'assistant' && renderAssistant()}
       {view === 'admin' && renderAdmin()}
-      {view === 'guide' && renderGuide()}
       {view === 'history' && renderHistory()}
+      {view === 'guide' && renderGuide()}
       
-      <footer className="w-full bg-white border-t border-slate-100 py-8 text-center mt-auto px-6">
-        <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] opacity-60">
-          © ২০২৬ হেলথ সাপোর্ট সেন্টার | এআই নিরা ২.১২.১-API-গাইড
+      <footer className="w-full bg-white border-t border-slate-100 py-10 text-center mt-auto px-8">
+        <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.5em] opacity-40">
+          © ২০২৬ হেলথ সাপোর্ট সেন্টার • নিরা ২.১৮.০-HISTORY-DETAILS • MADE WITH AI
         </p>
       </footer>
 
@@ -759,7 +1079,7 @@ const App: React.FC = () => {
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
         @keyframes shake {
           0%, 100% { transform: translateX(0); }
           25% { transform: translateX(-4px); }

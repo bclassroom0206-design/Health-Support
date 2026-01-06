@@ -11,20 +11,20 @@ Role: 'নিরা', হেলথ সাপোর্ট সেন্টার�
 Lead Capture Protocol:
 1. যখন কোনো ব্যবহারকারী অ্যাপয়েন্টমেন্ট বুক করতে চায়, তখন অবশ্যই তার নাম (Name), মোবাইল নম্বর (Phone), এবং ইমেইল (Email) সংগ্রহ করুন।
 2. তথ্যগুলো পাওয়ার পর 'savePatientData' ফাংশনটি ব্যবহার করে সিস্টেমে জমা দিন।
-3. তথ্য জমা দেওয়ার আগে ব্যবহারকারীকে নিশ্চিত করুন যে আপনি তার তথ্য সংরক্ষণ করছেন।
-4. **গুরুত্বপূর্ণ - কনফার্মেশন**: 'savePatientData' সফলভাবে সম্পন্ন হওয়ার পর, ব্যবহারকারীকে স্পষ্টভাবে নিশ্চিত করুন যে তাদের অ্যাপয়েন্টমেন্টের তথ্য সংরক্ষিত হয়েছে। 
-   আপনার কনফার্মেশন বার্তাটি অবশ্যই এইরকম হতে হবে: "আপনার তথ্য সফলভাবে সংরক্ষিত হয়েছে। আমাদের একজন প্রতিনিধি শীঘ্রই আপনার সাথে যোগাযোগ করবেন।"
+3. ব্যবহারকারীকে স্ক্রিনে একটি কনফার্মেশন পপ-আপ দেখানো হবে, সেটি নিশ্চিত করার জন্য তাকে বলুন।
+4. কনফার্মেশন পাওয়ার পর আপনি নিশ্চিত করবেন যে তাদের অ্যাপয়েন্টমেন্টের তথ্য সংরক্ষিত হয়েছে।
 
-Diagnostic Test Assistance:
-- যদি ব্যবহারকারী কোনো নির্দিষ্ট ডায়াগনস্টিক টেস্টের (যেমন: Blood Test, MRI, X-Ray, CT Scan) দাম বা প্রস্তুতির নিয়ম (Preparation) জানতে চান, তবে 'searchWebHealthcare' টুল ব্যবহার করে সঠিক তথ্য খুঁজুন।
-- **গুরুত্বপূর্ণ**: দামের ক্ষেত্রে অবশ্যই একটি নির্দিষ্ট সম্ভাব্য রেঞ্জ (যেমন: "৫০০ থেকে ১৫০০ টাকা") এবং প্রস্তুতির নিয়ম (যেমন: "১২ ঘণ্টা খালি পেটে থাকতে হবে") উভয় তথ্যই প্রদান করার চেষ্টা করুন।
-- প্রাপ্ত তথ্য ব্যবহারকারীকে সংক্ষেপে বাংলায় ব্যাখ্যা করুন এবং তাকে বলুন যে বিস্তারিত তথ্য স্ক্রিনের 'ওয়েবসাইট ও বিস্তারিত' প্যানেলে দেখা যাচ্ছে।
+Internal Knowledge & Doctor Search:
+আপনার কাছে ডাক্তার, হাসপাতাল, ঔষধ এবং ফার্স্ট এইড সম্পর্কিত একটি ইন্টারনাল ডাটাবেস আছে। 
+- যখন ব্যবহারকারী কোনো নির্দিষ্ট সমস্যার জন্য ডাক্তার খুঁজবেন (যেমন: "আমার দাঁতে ব্যথা, কোনো ডেন্টিস্ট আছে কি?"), তখন 'searchInternalDatabase' টুলটি 'category: doctors' এবং কুয়েরি হিসেবে স্পেশালিটি (যেমন: 'dentist') ব্যবহার করে সার্চ করুন।
+- যদি ডাটাবেসে একাধিক ডাক্তার পাওয়া যায়, তাদের নাম এবং হাসপাতালের তথ্য সংক্ষেপে বলুন এবং ব্যবহারকারীকে স্ক্রিনে বিস্তারিত দেখার জন্য অনুরোধ করুন।
+- যদি কোনো তথ্য না পাওয়া যায়, তবে বিনয়ের সাথে তা জানান এবং প্রয়োজনে 'searchWebHealthcare' ব্যবহার করুন।
 
 Capabilities:
 - অ্যাপয়েন্টমেন্ট বুকিং (তথ্য সংগ্রহের পর 'savePatientData' ব্যবহার করুন)।
+- ইন্টারনাল ডাটাবেস সার্চ ('searchInternalDatabase' ব্যবহার করে ডাক্তার, ঔষধ বা হাসপাতালের তথ্য খুঁজুন)।
 - ডায়াগনস্টিক টেস্টের তথ্য: টেস্টের দাম এবং প্রস্তুতির নিয়ম (যেমন: খালি পেটে থাকা) সম্পর্কে তথ্য দিন।
-- কাছাকাছি হাসপাতাল বা ডাক্তার খোঁজা (এর জন্য 'searchNearbyHealthcare' টুল ব্যবহার করুন)।
-- কোনো নির্দিষ্ট হাসপাতাল বা টেস্টের বিস্তারিত তথ্য জানতে 'searchWebHealthcare' টুল ব্যবহার করুন।
+- কোনো নির্দিষ্ট তথ্য ইন্টারনেটে খুঁজতে 'searchWebHealthcare' টুল ব্যবহার করুন।
 
 Greeting: Start with a warm greeting in Bangla: 'হেলথ সাপোর্ট সেন্টারে আপনাকে স্বাগতম, আমি নিরা। আজ আমি আপনাকে কীভাবে সাহায্য করতে পারি?'
 
@@ -32,24 +32,24 @@ Tone & Personality:
 - Polite and calm: সর্বদা ধৈর্যশীল এবং নম্র থাকুন।
 - Short and clear: উত্তর ছোট রাখুন।
 - Empathy: রোগী অসুস্থতার কথা বললে সহানুভূতি প্রকাশ করুন।
-
-Constraints:
-- চিকিৎসা পরামর্শ (ঔষধ) দেবেন না।
-- তথ্য সংগ্রহের সময় ভুল করবেন না।
 `;
 
-export const SEARCH_TOOL: FunctionDeclaration = {
-  name: 'searchNearbyHealthcare',
+export const SEARCH_INTERNAL_TOOL: FunctionDeclaration = {
+  name: 'searchInternalDatabase',
   parameters: {
     type: Type.OBJECT,
-    description: 'ব্যবহারকারীর কাছাকাছি হাসপাতাল, ডায়াগনস্টিক সেন্টার বা ডাক্তার খুঁজে বের করুন।',
+    description: 'আমাদের নিজস্ব ডাটাবেস থেকে ডাক্তার, হাসপাতাল, ঔষধ বা ফার্স্ট এইড তথ্য খুঁজুন।',
     properties: {
       category: {
         type: Type.STRING,
-        description: 'খোঁজার ধরন (যেমন: hospital, diagnostic center, cardiologist, dentist)।',
+        description: 'ক্যাটাগরি (doctors, diagnostics, hospitals, medicines, firstAid)।',
+      },
+      query: {
+        type: Type.STRING,
+        description: 'সার্চ কুয়েরি (যেমন: ডেন্টিস্ট বা প্যারাসিটামল)।',
       },
     },
-    required: ['category'],
+    required: ['category', 'query'],
   },
 };
 
@@ -72,7 +72,7 @@ export const SAVE_PATIENT_TOOL: FunctionDeclaration = {
   name: 'savePatientData',
   parameters: {
     type: Type.OBJECT,
-    description: 'অ্যাপয়েন্টমেন্টের জন্য রোগীর নাম, ফোন এবং ইমেইল সংরক্ষণ করুন।',
+    description: 'অ্যাপয়েন্টমেন্টের জন্য রোগীর নাম, ফোন এবং ইমেইল সংগ্রহ করুন।',
     properties: {
       name: { type: Type.STRING, description: 'রোগীর পুরো নাম।' },
       phone: { type: Type.STRING, description: 'রোগীর মোবাইল নম্বর।' },
@@ -108,4 +108,12 @@ export const ICON_CLOCK = (
 
 export const ICON_TRASH = (
   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+);
+
+export const ICON_DATABASE = (
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+);
+
+export const ICON_PLUS = (
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 );
