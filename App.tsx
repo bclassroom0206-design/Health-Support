@@ -45,6 +45,8 @@ const App: React.FC = () => {
   const [adminPassword, setAdminPassword] = useState<string>('');
   const [loginError, setLoginError] = useState<string>('');
   const [patients, setPatients] = useState<PatientRecord[]>([]);
+  const [editingPatientId, setEditingPatientId] = useState<string | null>(null);
+  const [patientSearch, setPatientSearch] = useState('');
 
   // Health Database state
   const [db, setDb] = useState<HealthDatabase>({
@@ -163,6 +165,11 @@ const App: React.FC = () => {
 
   const updateLeadStatus = (id: string, newStatus: PatientRecord['status']) => {
     setPatients(prev => prev.map(p => p.id === id ? { ...p, status: newStatus } : p));
+  };
+
+  const updatePatientProfile = (id: string, updatedData: Partial<PatientRecord>) => {
+    setPatients(prev => prev.map(p => p.id === id ? { ...p, ...updatedData } : p));
+    setEditingPatientId(null);
   };
 
   const deleteLead = (id: string) => setPatients(prev => prev.filter(p => p.id !== id));
@@ -579,6 +586,127 @@ const App: React.FC = () => {
     );
   };
 
+  const renderPatientManager = () => {
+    const filteredPatients = patients.filter(p => 
+      p.name.toLowerCase().includes(patientSearch.toLowerCase()) || 
+      p.phone.includes(patientSearch) || 
+      p.email.toLowerCase().includes(patientSearch.toLowerCase())
+    );
+
+    const currentPatient = editingPatientId ? patients.find(p => p.id === editingPatientId) : null;
+
+    const handlePatientSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      const formData = new FormData(e.currentTarget as HTMLFormElement);
+      const data = Object.fromEntries(formData.entries());
+      if (editingPatientId) {
+        updatePatientProfile(editingPatientId, data as any);
+      }
+    };
+
+    return (
+      <div className="bg-white p-8 md:p-10 rounded-[2.5rem] border border-slate-100 shadow-sm col-span-1 lg:col-span-3">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-12">
+          {/* Patient Editor */}
+          <div className="space-y-8">
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+              </div>
+              <h4 className="text-base font-black uppercase tracking-widest text-slate-800">
+                {editingPatientId ? 'প্রোফাইল এডিট করুন' : 'প্রোফাইল ব্যবস্থাপনা'}
+              </h4>
+            </div>
+
+            {editingPatientId ? (
+              <form onSubmit={handlePatientSubmit} className="space-y-5 animate-in slide-in-from-left-4">
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-4">নাম (Name)</label>
+                  <input name="name" defaultValue={currentPatient?.name} className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-emerald-500/10 transition-all" required />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-4">ফোন (Phone)</label>
+                  <input name="phone" defaultValue={currentPatient?.phone} className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-emerald-500/10 transition-all" required />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-4">ইমেইল (Email)</label>
+                  <input name="email" defaultValue={currentPatient?.email} className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-emerald-500/10 transition-all" required />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-4">স্ট্যাটাস (Status)</label>
+                  <select name="status" defaultValue={currentPatient?.status} className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-emerald-500/10 transition-all">
+                    <option value="new">NEW LEAD</option>
+                    <option value="contacted">CONTACTED</option>
+                    <option value="booked">BOOKED</option>
+                  </select>
+                </div>
+                <div className="flex gap-4 pt-4">
+                  <button type="button" onClick={() => setEditingPatientId(null)} className="flex-1 py-5 bg-slate-100 text-slate-500 rounded-3xl font-black text-xs uppercase tracking-widest border border-slate-200 hover:bg-slate-200 transition-all">বাতিল</button>
+                  <button type="submit" className="flex-[2] py-5 bg-emerald-600 text-white rounded-3xl font-black text-xs uppercase tracking-widest shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition-all">আপডেট করুন</button>
+                </div>
+              </form>
+            ) : (
+              <div className="py-20 text-center bg-slate-50/50 border border-dashed border-slate-200 rounded-[2.5rem] text-slate-400 italic text-xs px-10">
+                তালিকায় থাকা কোনো প্রোফাইলের 'এডিট' বাটনে ক্লিক করে তথ্য সংশোধন করুন।
+              </div>
+            )}
+          </div>
+
+          {/* Patient List */}
+          <div className="space-y-6">
+            <div className="sticky top-0 bg-white py-2 z-10 border-b border-slate-50 mb-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-black uppercase tracking-widest text-slate-800">ইউজার প্রোফাইল তালিকা</h4>
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{filteredPatients.length} জন</span>
+              </div>
+              <input 
+                type="text" 
+                placeholder="নাম বা ফোন দিয়ে খুঁজুন..." 
+                value={patientSearch}
+                onChange={(e) => setPatientSearch(e.target.value)}
+                className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all"
+              />
+            </div>
+            <div className="space-y-4 max-h-[600px] overflow-y-auto pr-3 custom-scrollbar">
+              {filteredPatients.length === 0 ? (
+                <div className="py-24 text-center text-slate-300 italic text-xs">কোনো প্রোফাইল পাওয়া যায়নি</div>
+              ) : filteredPatients.map((p) => (
+                <div key={p.id} className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 group hover:bg-white hover:shadow-xl hover:shadow-blue-500/5 transition-all">
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-1">
+                      <p className="text-sm font-black text-slate-800">{p.name}</p>
+                      <p className="text-[11px] text-slate-400 font-bold">{p.phone}</p>
+                      <p className="text-[10px] text-slate-400 font-medium">{p.email}</p>
+                      <div className={`mt-3 inline-block px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${p.status === 'booked' ? 'bg-emerald-100 text-emerald-700' : p.status === 'contacted' ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-600'}`}>
+                        {p.status}
+                      </div>
+                    </div>
+                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                      <button 
+                        onClick={() => { setEditingPatientId(p.id); window.scrollTo({ top: 400, behavior: 'smooth' }); }} 
+                        className="p-3 text-emerald-500 hover:text-white hover:bg-emerald-500 bg-white rounded-xl border border-slate-100 shadow-sm transition-all"
+                        title="এডিট প্রোফাইল"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+                      </button>
+                      <button 
+                        onClick={() => deleteLead(p.id)} 
+                        className="p-3 text-red-500 hover:text-white hover:bg-red-500 bg-white rounded-xl border border-slate-100 shadow-sm transition-all"
+                        title="মুছে ফেলুন"
+                      >
+                        {ICON_TRASH}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderAdmin = () => (
     <main className="flex-1 max-w-7xl mx-auto w-full p-6 md:p-12 animate-in fade-in duration-500">
       {!isAdminAuthenticated ? (
@@ -598,7 +726,7 @@ const App: React.FC = () => {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
             <div>
               <h2 className="text-4xl font-black text-slate-800 tracking-tight">অ্যাডমিন কন্ট্রোল সেন্টার</h2>
-              <p className="text-[10px] md:text-xs text-slate-400 font-black uppercase tracking-[0.3em] mt-3 opacity-80">DATABASE • LEADS • SYSTEM CONFIG</p>
+              <p className="text-[10px] md:text-xs text-slate-400 font-black uppercase tracking-[0.3em] mt-3 opacity-80">DATABASE • PROFILES • SYSTEM CONFIG</p>
             </div>
             <button onClick={handleAdminLogout} className="px-10 py-4 bg-red-50 text-red-600 rounded-[2rem] text-xs font-black uppercase tracking-widest border border-red-100 hover:bg-red-100 transition-all active:scale-95">লগআউট</button>
           </div>
@@ -622,46 +750,28 @@ const App: React.FC = () => {
                <button onClick={handleKeySelection} className="mt-8 w-full py-5 bg-emerald-600 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95">সিস্টেম কি আপডেট করুন</button>
             </div>
 
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col h-[500px]">
+            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col h-[400px]">
                <div className="flex items-center gap-4 mb-10">
-                 <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl shadow-inner">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-                 </div>
-                 <h4 className="text-sm font-black uppercase tracking-widest text-slate-800">সংগৃহীত লিড ({patients.length})</h4>
+                 <div className="p-4 bg-emerald-50 text-emerald-600 rounded-2xl shadow-inner"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
+                 <h4 className="text-sm font-black uppercase tracking-widest text-slate-800">পেশেন্ট স্ট্যাটাস</h4>
                </div>
-               <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                 <table className="w-full text-left">
-                   <tbody className="divide-y divide-slate-50">
-                     {patients.length === 0 ? (
-                       <tr><td className="py-20 text-center text-slate-300 italic text-xs">কোনো লিড পাওয়া যায়নি</td></tr>
-                     ) : patients.map(p => (
-                       <tr key={p.id} className="group hover:bg-slate-50 transition-all">
-                         <td className="py-6">
-                           <p className="text-sm font-black text-slate-800">{p.name}</p>
-                           <p className="text-[11px] text-slate-400 font-bold mt-0.5">{p.phone}</p>
-                           <div className="mt-3">
-                             <select 
-                               value={p.status} 
-                               onChange={(e) => updateLeadStatus(p.id, e.target.value as any)} 
-                               className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-[10px] font-black shadow-sm outline-none focus:ring-4 focus:ring-blue-500/10"
-                             >
-                               <option value="new">NEW LEAD</option>
-                               <option value="contacted">CONTACTED</option>
-                               <option value="booked">BOOKED</option>
-                             </select>
-                           </div>
-                         </td>
-                         <td className="py-6 text-right align-top">
-                           <button onClick={() => deleteLead(p.id)} className="text-red-300 hover:text-red-500 p-3 opacity-0 group-hover:opacity-100 transition-all" title="লিড ডিলিট করুন">{ICON_TRASH}</button>
-                         </td>
-                       </tr>
-                     ))}
-                   </tbody>
-                 </table>
+               <div className="space-y-4">
+                 <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
+                   <span className="text-[10px] font-black uppercase text-slate-400">মোট ইউজার</span>
+                   <span className="text-lg font-black text-slate-800">{patients.length}</span>
+                 </div>
+                 <div className="flex items-center justify-between p-4 bg-emerald-50 rounded-2xl text-emerald-700">
+                   <span className="text-[10px] font-black uppercase">বুকড (Booked)</span>
+                   <span className="text-lg font-black">{patients.filter(p => p.status === 'booked').length}</span>
+                 </div>
+                 <div className="flex items-center justify-between p-4 bg-blue-50 rounded-2xl text-blue-700">
+                   <span className="text-[10px] font-black uppercase">নতুন (New)</span>
+                   <span className="text-lg font-black">{patients.filter(p => p.status === 'new').length}</span>
+                 </div>
                </div>
             </div>
 
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col h-[500px]">
+            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col h-[400px]">
                <div className="flex items-center gap-4 mb-10">
                  <div className="p-4 bg-slate-50 text-slate-600 rounded-2xl shadow-inner">{ICON_CLOCK}</div>
                  <h4 className="text-sm font-black uppercase tracking-widest text-slate-800">কল হিস্ট্রি সামারি</h4>
@@ -669,21 +779,29 @@ const App: React.FC = () => {
                <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-5">
                  {callHistory.length === 0 ? (
                     <div className="py-20 text-center text-slate-300 italic text-xs">কল রেকর্ড পাওয়া যায়নি</div>
-                 ) : callHistory.map(h => (
+                 ) : callHistory.slice(0, 5).map(h => (
                    <div key={h.id} className="p-5 bg-slate-50 rounded-[2rem] border border-slate-100 relative group hover:bg-white transition-all">
-                      <button onClick={() => deleteHistory(h.id)} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 transition-all p-2">{ICON_TRASH}</button>
                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">{new Date(h.timestamp).toLocaleString('bn-BD')}</p>
                       <div className="flex items-center gap-2">
                         {h.summary === "সারাংশ তৈরি হচ্ছে..." && <LoadingSpinner size="w-3 h-3" color="text-slate-400" />}
-                        <p className="text-[11px] font-bold text-slate-700 leading-relaxed">{h.summary}</p>
+                        <p className="text-[11px] font-bold text-slate-700 leading-relaxed truncate">{h.summary}</p>
                       </div>
                    </div>
                  ))}
                </div>
             </div>
 
-            {/* Health Database Manager */}
+            {/* Patient Profile Management Section */}
             <div className="col-span-1 lg:col-span-3 pt-6">
+              <div className="flex items-center gap-4 mb-8">
+                <div className="p-4 bg-emerald-50 text-emerald-600 rounded-2xl shadow-inner"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
+                <h4 className="text-sm font-black uppercase tracking-widest text-slate-800">ইউজার প্রোফাইল ব্যবস্থাপনা (User Profiles)</h4>
+              </div>
+              {renderPatientManager()}
+            </div>
+
+            {/* Health Database Manager Section */}
+            <div className="col-span-1 lg:col-span-3 pt-12">
               <div className="flex items-center gap-4 mb-8">
                 <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl shadow-inner">{ICON_DATABASE}</div>
                 <h4 className="text-sm font-black uppercase tracking-widest text-slate-800">রিসোর্স ডাটাবেস (Healthcare Network)</h4>
@@ -1009,7 +1127,7 @@ const App: React.FC = () => {
                 },
                 {
                   q: "কল হিস্ট্রি কি চিরস্থায়ী?",
-                  a: "না, আপনার কথোপকথন ব্রাউজারের লোকাল স্টোরেজে জমা থাকে। ক্যাশে ডিলিট করলে বা 'কল মুছুন' বাটন চাপলে তা মুছে যাবে।"
+                  a: "হ্যাঁ, আপনার কথোপকথন ব্রাউজারের লোকাল স্টোরেজে জমা থাকে। ক্যাশে ডিলিট করলে বা 'কল মুছুন' বাটন চাপলে তা মুছে যাবে।"
                 },
                 {
                   q: "নিরা কি ঔষধের পরামর্শ দিতে পারে?",
@@ -1071,7 +1189,7 @@ const App: React.FC = () => {
       
       <footer className="w-full bg-white border-t border-slate-100 py-10 text-center mt-auto px-8">
         <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.5em] opacity-40">
-          © ২০২৬ হেলথ সাপোর্ট সেন্টার • নিরা ২.১৮.০-HISTORY-DETAILS • MADE WITH AI
+          © ২০২৬ হেলথ সাপোর্ট সেন্টার • নিরা ২.১৯.০-ADMIN-PROFILES • MADE WITH AI
         </p>
       </footer>
 
