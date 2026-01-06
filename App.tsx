@@ -3,7 +3,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
 import { 
   CallStatus, TranscriptionEntry, PatientRecord, AppView, CallHistoryEntry,
-  HealthDatabase, DoctorEntry, DiagnosticEntry, HospitalEntry, MedicineEntry, FirstAidEntry
+  HealthDatabase, DoctorEntry, DiagnosticEntry, HospitalEntry, MedicineEntry, FirstAidEntry,
+  ApiConfig
 } from './types.ts';
 import { decode, decodeAudioData, createBlob } from './audioUtils.ts';
 import { 
@@ -48,6 +49,10 @@ const App: React.FC = () => {
   const [editingPatientId, setEditingPatientId] = useState<string | null>(null);
   const [patientSearch, setPatientSearch] = useState('');
 
+  // API Management state
+  const [apiConfigs, setApiConfigs] = useState<ApiConfig[]>([]);
+  const [newApiInput, setNewApiInput] = useState({ label: '', provider: 'Gemini' as const, key: '' });
+
   // Health Database state
   const [db, setDb] = useState<HealthDatabase>({
     doctors: [],
@@ -74,6 +79,10 @@ const App: React.FC = () => {
     if (savedDb) {
       try { setDb(JSON.parse(savedDb)); } catch (e) { console.error("Database load failed", e); }
     }
+    const savedApis = localStorage.getItem('nira_api_vault');
+    if (savedApis) {
+      try { setApiConfigs(JSON.parse(savedApis)); } catch (e) { console.error("API Vault load failed", e); }
+    }
     const auth = localStorage.getItem('nira_admin_auth');
     if (auth === 'true') setIsAdminAuthenticated(true);
   }, []);
@@ -89,6 +98,10 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('nira_health_db', JSON.stringify(db));
   }, [db]);
+
+  useEffect(() => {
+    localStorage.setItem('nira_api_vault', JSON.stringify(apiConfigs));
+  }, [apiConfigs]);
 
   const inputAudioContextRef = useRef<AudioContext | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
@@ -176,6 +189,27 @@ const App: React.FC = () => {
   const deleteHistory = (id: string) => {
     setCallHistory(prev => prev.filter(h => h.id !== id));
     if (selectedHistory?.id === id) setSelectedHistory(null);
+  };
+
+  // API Config Handlers
+  const handleAddApiConfig = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newApiInput.label || !newApiInput.key) return;
+    const config: ApiConfig = {
+      id: Math.random().toString(36).substr(2, 9),
+      provider: newApiInput.provider,
+      label: newApiInput.label,
+      key: newApiInput.key,
+      createdAt: Date.now()
+    };
+    setApiConfigs([config, ...apiConfigs]);
+    setNewApiInput({ label: '', provider: 'Gemini', key: '' });
+  };
+
+  const deleteApiConfig = (id: string) => {
+    if (window.confirm("আপনি কি নিশ্চিতভাবে এই API কি টি মুছে ফেলতে চান?")) {
+      setApiConfigs(apiConfigs.filter(c => c.id !== id));
+    }
   };
 
   // Healthcare DB CRUD
@@ -295,7 +329,6 @@ const App: React.FC = () => {
                   const category = args.category as keyof HealthDatabase;
                   const query = args.query.toLowerCase();
                   
-                  // Simulate brief async delay for visual feedback
                   await new Promise(r => setTimeout(r, 800));
                   
                   const results = (db[category] || []).filter((item: any) => 
@@ -308,7 +341,6 @@ const App: React.FC = () => {
                   setIsSearchingWeb(true);
                   const args = fc.args as any;
                   
-                  // Simulate async web search delay
                   await new Promise(r => setTimeout(r, 1500));
                   
                   const mockResults = [
@@ -480,7 +512,6 @@ const App: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-12">
-          {/* Editor Form */}
           <div className="space-y-8">
             <div className="flex items-center gap-4">
               <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
@@ -539,7 +570,6 @@ const App: React.FC = () => {
             </form>
           </div>
 
-          {/* List View */}
           <div className="space-y-6">
             <div className="flex items-center justify-between sticky top-0 bg-white py-2 z-10 border-b border-slate-50 mb-4">
               <h4 className="text-sm font-black uppercase tracking-widest text-slate-800">সংরক্ষিত তথ্য তালিকা</h4>
@@ -607,7 +637,6 @@ const App: React.FC = () => {
     return (
       <div className="bg-white p-8 md:p-10 rounded-[2.5rem] border border-slate-100 shadow-sm col-span-1 lg:col-span-3">
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-12">
-          {/* Patient Editor */}
           <div className="space-y-8">
             <div className="flex items-center gap-4">
               <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
@@ -652,7 +681,6 @@ const App: React.FC = () => {
             )}
           </div>
 
-          {/* Patient List */}
           <div className="space-y-6">
             <div className="sticky top-0 bg-white py-2 z-10 border-b border-slate-50 mb-4 space-y-4">
               <div className="flex items-center justify-between">
@@ -706,6 +734,91 @@ const App: React.FC = () => {
       </div>
     );
   };
+
+  const renderApiManager = () => (
+    <div className="bg-white p-8 md:p-10 rounded-[2.5rem] border border-slate-100 shadow-sm col-span-1 lg:col-span-3">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-12">
+        <div className="space-y-8">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center">
+              {ICON_SETTINGS}
+            </div>
+            <h4 className="text-base font-black uppercase tracking-widest text-slate-800">
+              API কি যোগ করুন (Add API Key)
+            </h4>
+          </div>
+          <form onSubmit={handleAddApiConfig} className="space-y-5 animate-in slide-in-from-left-4">
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-4">নাম / লেবেল (Label)</label>
+              <input 
+                value={newApiInput.label} 
+                onChange={e => setNewApiInput({...newApiInput, label: e.target.value})} 
+                placeholder="যেমন: Gemini-Production" 
+                className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all" 
+                required 
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-4">প্রোভাইডার (Provider)</label>
+              <select 
+                value={newApiInput.provider} 
+                onChange={e => setNewApiInput({...newApiInput, provider: e.target.value as any})} 
+                className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
+              >
+                <option value="Gemini">Google Gemini</option>
+                <option value="DeepSeek">DeepSeek</option>
+                <option value="ChatGPT">ChatGPT (OpenAI)</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-4">API কি (Key)</label>
+              <input 
+                type="password"
+                value={newApiInput.key} 
+                onChange={e => setNewApiInput({...newApiInput, key: e.target.value})} 
+                placeholder="আপনার গোপন API কি লিখুন" 
+                className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all" 
+                required 
+              />
+            </div>
+            <button type="submit" className="w-full py-5 bg-indigo-600 text-white rounded-3xl font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all active:scale-95 mt-4">
+              কি সংরক্ষণ করুন (Save Key)
+            </button>
+          </form>
+        </div>
+
+        <div className="space-y-6">
+          <div className="flex items-center justify-between sticky top-0 bg-white py-2 z-10 border-b border-slate-50 mb-4">
+            <h4 className="text-sm font-black uppercase tracking-widest text-slate-800">সংরক্ষিত API তালিকা</h4>
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{apiConfigs.length} টি কি</span>
+          </div>
+          <div className="space-y-4 max-h-[600px] overflow-y-auto pr-3 custom-scrollbar">
+            {apiConfigs.length === 0 ? (
+              <div className="py-24 text-center text-slate-300 italic text-xs">কোনো API কি পাওয়া যায়নি</div>
+            ) : apiConfigs.map((config) => (
+              <div key={config.id} className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 group hover:bg-white hover:shadow-xl transition-all">
+                <div className="flex justify-between items-start">
+                  <div className="space-y-1">
+                    <p className="text-sm font-black text-slate-800">{config.label}</p>
+                    <div className={`mt-1 inline-block px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${config.provider === 'Gemini' ? 'bg-blue-100 text-blue-700' : config.provider === 'DeepSeek' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}`}>
+                      {config.provider}
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-bold mt-2">••••••••{config.key.slice(-4)}</p>
+                  </div>
+                  <button 
+                    onClick={() => deleteApiConfig(config.id)} 
+                    className="p-3 text-red-500 hover:text-white hover:bg-red-500 bg-white rounded-xl border border-slate-100 shadow-sm transition-all"
+                  >
+                    {ICON_TRASH}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   const renderAdmin = () => (
     <main className="flex-1 max-w-7xl mx-auto w-full p-6 md:p-12 animate-in fade-in duration-500">
@@ -791,7 +904,14 @@ const App: React.FC = () => {
                </div>
             </div>
 
-            {/* Patient Profile Management Section */}
+            <div className="col-span-1 lg:col-span-3 pt-6">
+              <div className="flex items-center gap-4 mb-8">
+                <div className="p-4 bg-indigo-50 text-indigo-600 rounded-2xl shadow-inner">{ICON_SETTINGS}</div>
+                <h4 className="text-sm font-black uppercase tracking-widest text-slate-800">API কি ব্যবস্থাপনা (API Key Management)</h4>
+              </div>
+              {renderApiManager()}
+            </div>
+
             <div className="col-span-1 lg:col-span-3 pt-6">
               <div className="flex items-center gap-4 mb-8">
                 <div className="p-4 bg-emerald-50 text-emerald-600 rounded-2xl shadow-inner"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
@@ -800,7 +920,6 @@ const App: React.FC = () => {
               {renderPatientManager()}
             </div>
 
-            {/* Health Database Manager Section */}
             <div className="col-span-1 lg:col-span-3 pt-12">
               <div className="flex items-center gap-4 mb-8">
                 <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl shadow-inner">{ICON_DATABASE}</div>
@@ -1065,7 +1184,6 @@ const App: React.FC = () => {
   const renderGuide = () => (
     <main className="flex-1 max-w-5xl mx-auto w-full p-6 md:p-12 animate-in fade-in zoom-in-95 duration-500">
       <div className="bg-white rounded-[4rem] border border-slate-100 shadow-2xl overflow-hidden">
-        {/* Guide Header */}
         <div className="bg-gradient-to-br from-emerald-600 to-emerald-800 p-12 md:p-20 text-white text-center">
           <div className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-3xl flex items-center justify-center mx-auto mb-10 shadow-inner">
              <div className="scale-[2]">{ICON_INFO}</div>
@@ -1074,10 +1192,8 @@ const App: React.FC = () => {
           <p className="text-emerald-100/80 font-bold text-sm md:text-lg max-w-2xl mx-auto leading-relaxed uppercase tracking-widest">নিরার সকল ফিচারের সঠিক ব্যবহারের নির্দেশনাবলী</p>
         </div>
 
-        {/* Guide Content */}
         <div className="p-10 md:p-20 space-y-20">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-            {/* Capability 1 */}
             <section className="space-y-6 group">
               <div className="flex items-center gap-5">
                 <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform">
@@ -1093,7 +1209,6 @@ const App: React.FC = () => {
               </div>
             </section>
 
-            {/* Capability 2 */}
             <section className="space-y-6 group">
               <div className="flex items-center gap-5">
                 <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform">
@@ -1112,7 +1227,6 @@ const App: React.FC = () => {
 
           <hr className="border-slate-100" />
 
-          {/* FAQ Section */}
           <section className="space-y-12">
             <h3 className="text-3xl font-black text-slate-800 text-center tracking-tight">সচরাচর জিজ্ঞাসিত প্রশ্নাবলী (FAQ)</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -1189,7 +1303,7 @@ const App: React.FC = () => {
       
       <footer className="w-full bg-white border-t border-slate-100 py-10 text-center mt-auto px-8">
         <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.5em] opacity-40">
-          © ২০২৬ হেলথ সাপোর্ট সেন্টার • নিরা ২.১৯.০-ADMIN-PROFILES • MADE WITH AI
+          © ২০২৬ হেলথ সাপোর্ট সেন্টার • নিরা ২.২০.০-ADMIN-VAULT • MADE WITH AI
         </p>
       </footer>
 

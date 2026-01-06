@@ -28,6 +28,14 @@ export interface CallHistoryEntry {
   transcript: TranscriptionEntry[];
 }
 
+export interface ApiConfig {
+  id: string;
+  provider: 'Gemini' | 'DeepSeek' | 'ChatGPT';
+  label: string;
+  key: string;
+  createdAt: number;
+}
+
 // Healthcare Database Interfaces
 export interface DoctorEntry { id: string; name: string; specialty: string; hospital: string; contact: string; }
 export interface DiagnosticEntry { id: string; name: string; tests: string; location: string; contact: string; }
